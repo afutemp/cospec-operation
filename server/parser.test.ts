@@ -129,9 +129,15 @@ test("worker persists versioned facts and exposes Run-level metric inputs", asyn
   assert.equal(facts.tokens.cache_read_input_tokens, 3);
   assert.equal(facts.tokens.reported_total_tokens, null);
   assert.deepEqual(facts.tools, { calls: 2, successes: 1, failures: 0, determined_results: 1, unknown_results: 1, status_coverage: 0.5,
+    duration: { measured_calls: 1, unknown_calls: 1, invalid_intervals: 0, coverage: 0.5,
+      accumulated_ms: 1000, wall_clock_ms: 1000, p50_ms: 1000, p90_ms: 1000, semantics: "call_to_result_timestamp" },
     byTool: {
-      Bash: { calls: 1, successes: 1, failures: 0, unknown_results: 0, determined_results: 1, status_coverage: 1 },
-      Read: { calls: 1, successes: 0, failures: 0, unknown_results: 1, determined_results: 0, status_coverage: 0 },
+      Bash: { calls: 1, successes: 1, failures: 0, unknown_results: 0, determined_results: 1, status_coverage: 1,
+        duration: { measured_calls: 1, unknown_calls: 0, invalid_intervals: 0, coverage: 1,
+          accumulated_ms: 1000, wall_clock_ms: 1000, p50_ms: 1000, p90_ms: 1000, semantics: "call_to_result_timestamp" } },
+      Read: { calls: 1, successes: 0, failures: 0, unknown_results: 1, determined_results: 0, status_coverage: 0,
+        duration: { measured_calls: 0, unknown_calls: 1, invalid_intervals: 0, coverage: 0,
+          accumulated_ms: 0, wall_clock_ms: 0, p50_ms: null, p90_ms: null, semantics: "call_to_result_timestamp" } },
     } });
   assert.equal(facts.attribution.skill, "unavailable");
   assert.equal(facts.interval.semantics, "host_record_span");
@@ -155,9 +161,46 @@ test("Run facts pair tool calls and direct failures across raw chunk boundaries"
   await repository.accept(first, firstBytes);
   await repository.accept(second, secondBytes);
   await new ParserWorker(repository).runPending();
-  const tools = (repository.getRunFacts(runId) as { tools: { byTool: Record<string, Record<string, number>> } }).tools;
-  assert.deepEqual(tools.byTool.Bash, { calls: 1, successes: 0, failures: 1, unknown_results: 0, determined_results: 1, status_coverage: 1 });
+  const tools = (repository.getRunFacts(runId) as { tools: { byTool: Record<string, Record<string, unknown>> } }).tools;
+  assert.deepEqual(tools.byTool.Bash, { calls: 1, successes: 0, failures: 1, unknown_results: 0, determined_results: 1, status_coverage: 1,
+    duration: { measured_calls: 1, unknown_calls: 0, invalid_intervals: 0, coverage: 1,
+      accumulated_ms: 1000, wall_clock_ms: 1000, p50_ms: 1000, p90_ms: 1000, semantics: "call_to_result_timestamp" } });
   assert.equal(JSON.stringify(repository.getRunFacts(runId)).includes("private"), false);
+  repository.close();
+});
+
+test("Run tool durations merge concurrent time and reject reversed intervals", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cospec-tool-duration-facts-"));
+  const at = (seconds: number) => `2026-09-01T01:00:${String(seconds).padStart(2, "0")}.000Z`;
+  const bytes = Buffer.from([
+    JSON.stringify({ type: "assistant", timestamp: at(0), message: { role: "assistant", content: [
+      { type: "tool_use", id: "long", name: "Bash" },
+    ] } }),
+    JSON.stringify({ type: "assistant", timestamp: at(1), message: { role: "assistant", content: [
+      { type: "tool_use", id: "inside", name: "Read" },
+    ] } }),
+    JSON.stringify({ type: "user", timestamp: at(4), message: { role: "user", content: [
+      { type: "tool_result", tool_use_id: "inside", is_error: false },
+    ] } }),
+    JSON.stringify({ type: "user", timestamp: at(5), message: { role: "user", content: [
+      { type: "tool_result", tool_use_id: "long", is_error: false },
+    ] } }),
+    JSON.stringify({ type: "user", timestamp: at(9), message: { role: "user", content: [
+      { type: "tool_result", tool_use_id: "reversed", is_error: false },
+    ] } }),
+    JSON.stringify({ type: "assistant", timestamp: at(10), message: { role: "assistant", content: [
+      { type: "tool_use", id: "reversed", name: "Write" },
+      { type: "tool_use", id: "missing", name: "Write" },
+    ] } }),
+  ].join("\n") + "\n");
+  const value = metadata(bytes);
+  value.source_type = "claude_code_jsonl"; value.environment.agent_type = "claude_code";
+  const repository = await DurableChunkRepository.open(root);
+  await repository.accept(value, bytes);
+  await new ParserWorker(repository).runPending();
+  const duration = (repository.getRunFacts(value.cospec_run_id) as { tools: { duration: Record<string, unknown> } }).tools.duration;
+  assert.deepEqual(duration, { measured_calls: 2, unknown_calls: 1, invalid_intervals: 1, coverage: 0.5,
+    accumulated_ms: 8000, wall_clock_ms: 5000, p50_ms: 3000, p90_ms: 5000, semantics: "call_to_result_timestamp" });
   repository.close();
 });
 

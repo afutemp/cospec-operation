@@ -290,6 +290,13 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
         SUM(CASE WHEN results.status='failure' THEN 1 ELSE 0 END) AS failures,
         SUM(CASE WHEN results.status IS NULL OR results.status='unknown' THEN 1 ELSE 0 END) AS unknown_results
       FROM calls LEFT JOIN results ON results.call_id=calls.call_id GROUP BY calls.tool_name ORDER BY calls.tool_name`).all(runId, version, runId, version);
+    const toolCallTimes = this.database.prepare(`SELECT f.call_id,f.tool_name,f.timestamp FROM tool_call_facts f
+      JOIN chunks c ON c.upload_id=f.upload_id WHERE c.cospec_run_id=? AND f.parser_version=?
+      ORDER BY f.record_index,f.item_index`).all(runId, version) as Array<Record<string, unknown>>;
+    const toolResultTimes = this.database.prepare(`SELECT f.call_id,f.timestamp FROM tool_result_facts f
+      JOIN chunks c ON c.upload_id=f.upload_id WHERE c.cospec_run_id=? AND f.parser_version=?
+      ORDER BY f.record_index,f.item_index`).all(runId, version) as Array<Record<string, unknown>>;
+    const toolDurations = calculateToolDurations(toolCallTimes, toolResultTimes);
     const modelRows = this.database.prepare(`SELECT model,COUNT(*) AS observations FROM token_usage_facts t JOIN chunks c ON c.upload_id=t.upload_id
       WHERE c.cospec_run_id=? AND t.parser_version=? AND model IS NOT NULL GROUP BY model ORDER BY model`).all(runId, version);
     const time = this.database.prepare(`SELECT MIN(timestamp) AS first_event_at,MAX(timestamp) AS last_event_at FROM (
@@ -300,9 +307,10 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
       parserVersion: version,
       messages: { total: messageRows.reduce((sum, row) => sum + Number(row.count), 0), byRole: Object.fromEntries(messageRows.map((row) => [String(row.role), Number(row.count)])) },
       tokens: { ...numericObject(token), byModel: Object.fromEntries(modelRows.map((row) => [String(row.model), Number(row.observations)])) },
-      tools: { ...toolStatusMetrics(toolCounts), byTool: Object.fromEntries(toolRows.map((row) => {
+      tools: { ...toolStatusMetrics(toolCounts), duration: toolDurations.overall, byTool: Object.fromEntries(toolRows.map((row) => {
         const { tool_name: _toolName, ...counts } = row;
-        return [String(row.tool_name), toolStatusMetrics(numericObject(counts))];
+        const toolName = String(row.tool_name);
+        return [toolName, { ...toolStatusMetrics(numericObject(counts)), duration: toolDurations.byTool[toolName] }];
       })) },
       interval: { firstEventAt: time.first_event_at ?? null, lastEventAt: time.last_event_at ?? null, semantics: "host_record_span" },
       attribution: { run: "explicit_jsonl_offset_interval", skill: "unavailable" },
@@ -443,6 +451,90 @@ function toolStatusMetrics(counts: Record<string, number | null>): Record<string
     unknown_results: Math.max(0, calls - determinedResults),
     status_coverage: calls === 0 ? null : determinedResults / calls,
   };
+}
+
+interface ToolInterval { start: number; end: number }
+
+function calculateToolDurations(callRows: Array<Record<string, unknown>>, resultRows: Array<Record<string, unknown>>): {
+  overall: Record<string, number | string | null>;
+  byTool: Record<string, Record<string, number | string | null>>;
+} {
+  const resultTimes = new Map<string, number[]>();
+  for (const row of resultRows) {
+    const timestamp = timestampMs(row.timestamp);
+    if (timestamp === null) continue;
+    const callId = String(row.call_id);
+    const values = resultTimes.get(callId) ?? [];
+    values.push(timestamp);
+    resultTimes.set(callId, values);
+  }
+  for (const values of resultTimes.values()) values.sort((a, b) => a - b);
+
+  const all = durationAccumulator();
+  const byTool = new Map<string, ReturnType<typeof durationAccumulator>>();
+  for (const row of callRows) {
+    const toolName = String(row.tool_name);
+    const tool = byTool.get(toolName) ?? durationAccumulator();
+    byTool.set(toolName, tool);
+    const start = timestampMs(row.timestamp);
+    const candidates = resultTimes.get(String(row.call_id)) ?? [];
+    if (start === null || candidates.length === 0) {
+      all.unknown += 1; tool.unknown += 1; continue;
+    }
+    const end = candidates.find((candidate) => candidate >= start);
+    if (end === undefined) {
+      all.invalid += 1; tool.invalid += 1; continue;
+    }
+    all.intervals.push({ start, end });
+    tool.intervals.push({ start, end });
+  }
+  return {
+    overall: summarizeDurations(callRows.length, all),
+    byTool: Object.fromEntries([...byTool].map(([name, value]) => [name, summarizeDurations(
+      callRows.filter((row) => String(row.tool_name) === name).length, value)])),
+  };
+}
+
+function durationAccumulator(): { intervals: ToolInterval[]; unknown: number; invalid: number } {
+  return { intervals: [], unknown: 0, invalid: 0 };
+}
+
+function summarizeDurations(total: number, value: ReturnType<typeof durationAccumulator>): Record<string, number | string | null> {
+  const durations = value.intervals.map(({ start, end }) => end - start).sort((a, b) => a - b);
+  return {
+    measured_calls: durations.length,
+    unknown_calls: value.unknown,
+    invalid_intervals: value.invalid,
+    coverage: total === 0 ? null : durations.length / total,
+    accumulated_ms: durations.reduce((sum, duration) => sum + duration, 0),
+    wall_clock_ms: mergedDuration(value.intervals),
+    p50_ms: percentile(durations, 0.5),
+    p90_ms: percentile(durations, 0.9),
+    semantics: "call_to_result_timestamp",
+  };
+}
+
+function timestampMs(value: unknown): number | null {
+  if (typeof value !== "string") return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function percentile(sorted: number[], ratio: number): number | null {
+  if (sorted.length === 0) return null;
+  return sorted[Math.ceil(sorted.length * ratio) - 1] ?? null;
+}
+
+function mergedDuration(intervals: ToolInterval[]): number {
+  const sorted = [...intervals].sort((a, b) => a.start - b.start || a.end - b.end);
+  let total = 0;
+  let current: ToolInterval | null = null;
+  for (const interval of sorted) {
+    if (!current) current = { ...interval };
+    else if (interval.start <= current.end) current.end = Math.max(current.end, interval.end);
+    else { total += current.end - current.start; current = { ...interval }; }
+  }
+  return total + (current ? current.end - current.start : 0);
 }
 
 async function exists(path: string): Promise<boolean> {

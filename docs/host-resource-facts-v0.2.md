@@ -47,6 +47,18 @@ Authorization: Bearer <token>
 - `unknown_results = calls - determined_results`，包含显式 unknown 和没有可关联结果的调用；
 - `status_coverage = determined_results / calls`，无调用时为 `null`。
 
+工具耗时不依赖成功/失败字段，只要同一 `call_id` 的调用和结果都有合法时间即可计算。`duration` 返回：
+
+- `measured_calls`：能够算出耗时的调用数；
+- `unknown_calls`：缺少调用时间、结果时间或结果记录的调用数；
+- `invalid_intervals`：结果时间早于调用时间的异常记录数；
+- `coverage`：可计算耗时的调用占全部调用的比例；
+- `accumulated_ms`：每次工具耗时相加，表示工具使用量；
+- `wall_clock_ms`：重叠执行只算一次，表示 Run 实际有多长时间处于工具执行中；
+- `p50_ms` / `p90_ms`：一半/九成工具调用可在该时长内返回。
+
+按工具名称的 `byTool` 使用同一口径。该时长是宿主记录的“发起调用到记录结果”时间，不宣称是工具内部纯执行时间。
+
 若展示可判定样本内的失败占比，分母只能使用 `determined_results`，并且必须同时展示 `status_coverage`。覆盖率不足或跨版本不稳定时，不发布统一“工具成功率/失败率”；`failures` 只能命名为“明确失败次数（下界）”。
 
 ## 当前限制
@@ -65,5 +77,6 @@ Authorization: Bearer <token>
 - Codex 0.150.1：1,451 行、178 条消息、198 个 Token observation、169 个工具调用和 169 个结果；指定样本的结果均缺少可识别的结构化 `exit_code`，因此 169 个全部保持 unknown，未误判为成功；
 - 补充扫描本机 Codex sessions：41 个文件共发现 218 条结构化退出码，其中 171 条为 0、47 条为非零；它们位于 `custom_tool_call_output.payload.output[].text` 的二次 JSON 中。该结果证明退出码部分可得，也证明单一会话的覆盖率不能代表整体；
 - Claude Code 2.1.220：2,375 行、1,354 条消息、835 个 Token observation、433 个工具调用和 433 个结果；结果为 98 success、12 failure、323 unknown，与原验证报告中 110 个显式 `is_error`、其中 12 个 true 完全一致；
+- 工具耗时核对：Codex 样本 169/169 次、Claude Code 样本 433/433 次均能按调用 ID 和时间配对；Codex 累计/实际经过时间均为 723,304 ms，Claude Code 累计为 2,528,696 ms、去除并发重叠后为 2,515,745 ms；
 - 两个宿主的调用/结果数量均一一对应；验证过程未输出或复制正文、工具参数和工具结果；
 - 自动化测试另验证了调用与结果跨原始块时，仍能在 Run 查询中按 call ID 形成正确的按工具失败统计。
