@@ -25,7 +25,10 @@ export async function createIngestApp(options: IngestOptions): Promise<FastifyIn
   addFormats(ajv);
   const validate = ajv.compile(schema);
   await app.register(multipart, { limits: { files: 1, fields: 1, fileSize: MAX_CHUNK_BYTES } });
-  await app.register(fastifyStatic, { root: fileURLToPath(new URL("../web", import.meta.url)), wildcard: false });
+  await app.register(fastifyStatic, {
+    root: fileURLToPath(new URL("../web", import.meta.url)), wildcard: false,
+    setHeaders(reply) { reply.header("Cache-Control", "no-store"); },
+  });
 
   app.get("/health/live", async () => ({ status: "ok" }));
 
@@ -130,7 +133,10 @@ export async function createIngestApp(options: IngestOptions): Promise<FastifyIn
     });
   }
   app.setNotFoundHandler((request, reply) => {
-    if (request.method === "GET" && !request.url.startsWith("/api/") && !request.url.startsWith("/health/")) return reply.sendFile("index.html");
+    if (request.method === "GET" && !request.url.startsWith("/api/") && !request.url.startsWith("/health/") && !request.url.startsWith("/assets/")) {
+      reply.header("Cache-Control", "no-store");
+      return reply.sendFile("index.html");
+    }
     return reply.code(404).send({ error: "not_found" });
   });
   return app;
