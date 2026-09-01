@@ -32,6 +32,21 @@ export interface CollectorState {
   schemaVersion: 1;
   files: Record<string, FileState>;
   runs: Record<string, RunBinding>;
+  diagnostics?: CollectorDiagnostics;
+}
+
+export interface CollectorDiagnostics {
+  lastScanAt: string | null;
+  lastSuccessAt: string | null;
+  consecutiveFailures: number;
+  lastError: {
+    at: string;
+    stage: "scan" | "upload";
+    code: string;
+    cospecRunId?: string;
+    sourceFileId?: string;
+  } | null;
+  recoveredAt: string | null;
 }
 
 export type CollectorCommand =
