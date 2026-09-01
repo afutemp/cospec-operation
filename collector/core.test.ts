@@ -7,7 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { MAX_CHUNK_BYTES, readNextChunk } from "./chunk.js";
-import { locateCodexSession } from "./session.js";
+import { locateClaudeCodeSession, locateCodexSession } from "./session.js";
 import { JsonStateStore, emptyState } from "./state.js";
 import { RunRegistry, runBindingContract } from "./runs.js";
 import { CollectorScanner, type ChunkReceiver } from "./scanner.js";
@@ -38,6 +38,21 @@ test("locates Codex JSONL by session_meta and ignores incomplete tail", async ()
   const located = await locateCodexSession(item.root, item.sessionId);
   assert.equal(located?.path, item.path);
   assert.equal(located?.completeOffset, complete.length);
+});
+
+test("locates Claude Code JSONL by filename and line sessionId and reads current version", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cospec-claude-session-"));
+  const project = join(root, "-test-project");
+  const sessionId = randomUUID();
+  await mkdir(project, { recursive: true });
+  const path = join(project, `${sessionId}.jsonl`);
+  const complete = `${JSON.stringify({ type: "queue-operation", sessionId })}\n${JSON.stringify({ type: "user", sessionId, version: "2.1.220", timestamp: "2026-09-01T00:00:00Z" })}\n`;
+  await writeFile(path, `${complete}{"partial":`);
+  const located = await locateClaudeCodeSession(root, sessionId);
+  assert.equal(located?.path, path);
+  assert.equal(located?.sourceVersion, "2.1.220");
+  assert.equal(located?.completeOffset, Buffer.byteLength(complete));
+  assert.equal(await locateClaudeCodeSession(root, randomUUID()), null);
 });
 
 test("reads only complete lines and keeps contiguous byte offsets", async () => {
@@ -133,6 +148,26 @@ test("scanner advances offset only after receiver acceptance", async () => {
   addFormats(ajv);
   const metadataSchema = JSON.parse(await readFile(join(process.cwd(), "contracts", "jsonl-chunk-metadata.schema.json"), "utf8"));
   assert.equal(ajv.validate(metadataSchema, received[0]?.metadata), true, JSON.stringify(ajv.errors));
+});
+
+test("Claude Code run reuses chunking and emits isolated source metadata", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cospec-claude-scan-"));
+  const project = join(root, "-project");
+  const stateDirectory = join(root, "state");
+  const sessionId = randomUUID();
+  await mkdir(project, { recursive: true });
+  const path = join(project, `${sessionId}.jsonl`);
+  await writeFile(path, `${JSON.stringify({ type: "user", sessionId, version: "2.1.220" })}\n`);
+  const state = emptyState();
+  await new RunRegistry({ codex: join(root, "codex"), claude_code: root }).ensure(state, "claude_code", sessionId, randomUUID());
+  await new JsonStateStore(stateDirectory).save(state);
+  await appendFileCompat(path, `${JSON.stringify({ type: "assistant", sessionId, version: "2.1.220" })}\n`);
+  const received: ChunkMetadata[] = [];
+  await new CollectorScanner(new JsonStateStore(stateDirectory), { async accept(metadata) { received.push(metadata); } }).scan();
+  assert.equal(received.length, 1);
+  assert.equal(received[0]?.source_type, "claude_code_jsonl");
+  assert.equal(received[0]?.environment.agent_type, "claude_code");
+  assert.equal(received[0]?.source_version, "2.1.220");
 });
 
 test("run binding output conforms to the frozen schema", async () => {

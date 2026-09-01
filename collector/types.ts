@@ -2,6 +2,7 @@ export type AgentType = "codex" | "claude_code";
 export type RunStatus = "pending" | "open" | "completed" | "failed" | "interrupted";
 
 export interface FileState {
+  agentType?: AgentType;
   sourceFileId: string;
   canonicalPath: string;
   agentSessionId: string;
@@ -62,7 +63,7 @@ export interface ChunkMetadata {
   schema_version: "0.1.0";
   upload_id: string;
   cospec_run_id: string;
-  source_type: "codex_jsonl";
+  source_type: "codex_jsonl" | "claude_code_jsonl";
   source_version: string;
   agent_session_id: string;
   collected_at: string;
@@ -73,7 +74,7 @@ export interface ChunkMetadata {
     sha256: string; previous_chunk_sha256: string | null; ends_with_newline: true;
   };
   environment: {
-    captured_at: string; agent_type: "codex"; agent_version: string;
+    captured_at: string; agent_type: AgentType; agent_version: string;
     os_platform: "linux" | "darwin" | "win32"; os_arch: string;
     cospec_plugin_version: string; timezone: string;
   };

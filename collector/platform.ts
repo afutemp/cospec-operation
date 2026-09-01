@@ -25,3 +25,7 @@ export function getStateDirectory(): string {
 export function getCodexSessionsRoot(): string {
   return process.env.CODEX_SESSIONS_ROOT ?? join(homedir(), ".codex", "sessions");
 }
+
+export function getClaudeCodeSessionsRoot(): string {
+  return process.env.CLAUDE_CODE_PROJECTS_ROOT ?? join(homedir(), ".claude", "projects");
+}

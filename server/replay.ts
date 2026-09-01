@@ -32,7 +32,7 @@ export class ReplayService {
       for (const chunk of chunks) {
         const bytes = await readFile(chunk.rawPath);
         if (createHash("sha256").update(bytes).digest("hex") !== chunk.sha256) throw new Error("raw_hash_mismatch");
-        const result = parser(bytes);
+        const result = parser(bytes, chunk.sourceType);
         if (result.status !== "completed" && result.status !== "completed_with_errors") throw new Error("parser_failed");
         this.repository.saveReplayResult(chunk.uploadId, result);
         completed += 1;

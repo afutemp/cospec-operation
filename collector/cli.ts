@@ -50,9 +50,10 @@ async function main(): Promise<void> {
   if (command === "daemon") { await startDaemon(); return; }
   if (command === "ensure") {
     const agentType = (option("agent") ?? "codex") as AgentType;
+    const environmentSessionId = agentType === "claude_code" ? process.env.CLAUDE_SESSION_ID : process.env.CODEX_SESSION_ID;
     await sendWithAutostart({
       type: "ensure", agentType,
-      agentSessionId: option("session-id") ?? process.env.CODEX_SESSION_ID ?? required("session-id"),
+      agentSessionId: option("session-id") ?? environmentSessionId ?? required("session-id"),
       cospecRunId: option("run-id") ?? randomUUID(),
     });
     return;

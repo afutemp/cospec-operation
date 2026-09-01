@@ -64,9 +64,9 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
 
   close(): void { this.database.close(); }
 
-  pendingChunks(): Array<{ uploadId: string; runId: string; rawPath: string; sha256: string }> {
-    return this.database.prepare("SELECT upload_id, cospec_run_id, raw_path, sha256 FROM chunks WHERE parser_status='pending' ORDER BY received_at").all()
-      .map((row) => ({ uploadId: String(row.upload_id), runId: String(row.cospec_run_id), rawPath: join(this.root, String(row.raw_path)), sha256: String(row.sha256) }));
+  pendingChunks(): Array<{ uploadId: string; runId: string; rawPath: string; sha256: string; sourceType: "codex_jsonl" | "claude_code_jsonl" }> {
+    return this.database.prepare("SELECT upload_id, cospec_run_id, raw_path, sha256, json_extract(metadata_json,'$.source_type') AS source_type FROM chunks WHERE parser_status='pending' ORDER BY received_at").all()
+      .map((row) => ({ uploadId: String(row.upload_id), runId: String(row.cospec_run_id), rawPath: join(this.root, String(row.raw_path)), sha256: String(row.sha256), sourceType: String(row.source_type) as "codex_jsonl" | "claude_code_jsonl" }));
   }
 
   saveParseResult(uploadId: string, result: ParseResult): void {
@@ -106,9 +106,9 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
     return this.database.prepare("SELECT * FROM parse_results ORDER BY parsed_at").all() as Array<Record<string, unknown>>;
   }
 
-  runChunks(runId: string): Array<{ uploadId: string; rawPath: string; sha256: string }> {
-    return this.database.prepare("SELECT upload_id,raw_path,sha256 FROM chunks WHERE cospec_run_id=? ORDER BY start_offset")
-      .all(runId).map((row) => ({ uploadId: String(row.upload_id), rawPath: join(this.root, String(row.raw_path)), sha256: String(row.sha256) }));
+  runChunks(runId: string): Array<{ uploadId: string; rawPath: string; sha256: string; sourceType: "codex_jsonl" | "claude_code_jsonl" }> {
+    return this.database.prepare("SELECT upload_id,raw_path,sha256,json_extract(metadata_json,'$.source_type') AS source_type FROM chunks WHERE cospec_run_id=? ORDER BY start_offset")
+      .all(runId).map((row) => ({ uploadId: String(row.upload_id), rawPath: join(this.root, String(row.raw_path)), sha256: String(row.sha256), sourceType: String(row.source_type) as "codex_jsonl" | "claude_code_jsonl" }));
   }
 
   saveReplayResult(uploadId: string, result: ParseResult): void {

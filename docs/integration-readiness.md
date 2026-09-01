@@ -15,6 +15,8 @@
 | `COSPEC_TELEMETRY_SCAN_INTERVAL_MS` | Collector | `300000` | 后台扫描周期；主要用于自动化测试覆盖 |
 | `CODEX_SESSIONS_ROOT` | Collector | Codex 默认 sessions 目录 | 测试或非默认安装时覆盖 |
 | `CODEX_SESSION_ID` | Collector CLI | 可由 `--session-id` 代替 | 精确关联 JSONL 的 Agent Session ID |
+| `CLAUDE_CODE_PROJECTS_ROOT` | Collector | `~/.claude/projects` | Claude Code projects 根目录 |
+| `CLAUDE_SESSION_ID` | Collector CLI | 可由 `--session-id` 代替 | 精确关联 Claude Code JSONL |
 
 Server 缺少 token、端口非法时会在监听前失败。Collector 配置了 Server URL 却缺少 token 时，daemon 启动失败，CLI 返回非零退出码。daemon 会继承首次拉起它的环境；改变 URL 或 token 后先执行 `shutdown`。
 
@@ -60,7 +62,7 @@ node dist/collector/cli.js shutdown
 ## 当前非阻塞限制
 
 - Windows 代码路径存在，但 Named Pipe、状态目录、轮转和完整 E2E 尚未在 Windows 实机验收；
-- Claude Code JSONL 尚未接入；
+- Claude Code 已按 2.1.220 验证，其他版本和 Windows 实机行为尚未验证；
 - 尚未提供系统服务安装、TLS、密钥分发、生产存储运维和保留/删除策略；
 - 重放仅由服务端 CLI 手工触发；
 - 页面、Artifact 与运营指标不在当前基线内。

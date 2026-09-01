@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import type { ChunkMetadata } from "../collector/types.js";
 import { DurableChunkRepository } from "./durable-repository.js";
-import { parseCodexJsonl } from "./parser.js";
+import { parseClaudeCodeJsonl, parseCodexJsonl } from "./parser.js";
 import { ParserWorker } from "./parser-worker.js";
 
 test("minimal parser counts valid, invalid and unknown records without retaining content", () => {
@@ -22,6 +22,21 @@ test("minimal parser counts valid, invalid and unknown records without retaining
   assert.equal(result.lastTimestamp, "2026-09-01T02:00:00Z");
   assert.deepEqual(result.diagnostics, [{ line: 2, byteOffset: Buffer.byteLength(first), code: "invalid_json" }]);
   assert.equal(JSON.stringify(result).includes("not retained"), false);
+});
+
+test("Claude Code parser recognizes current control and message types without retaining content", () => {
+  const bytes = Buffer.from([
+    JSON.stringify({ type: "queue-operation", sessionId: "session", content: "not retained" }),
+    JSON.stringify({ type: "user", sessionId: "session", version: "2.1.220", timestamp: "2026-09-01T01:00:00Z", message: { content: "private" } }),
+    JSON.stringify({ type: "assistant", sessionId: "session", version: "2.1.220", timestamp: "2026-09-01T01:00:01Z" }),
+    JSON.stringify({ type: "future-claude-type", sessionId: "session" }),
+  ].join("\n") + "\n");
+  const result = parseClaudeCodeJsonl(bytes);
+  assert.equal(result.validLines, 4);
+  assert.equal(result.unknownTypeLines, 1);
+  assert.deepEqual(result.typeCounts, { "queue-operation": 1, user: 1, assistant: 1, "future-claude-type": 1 });
+  assert.equal(result.firstTimestamp, "2026-09-01T01:00:00Z");
+  assert.equal(JSON.stringify(result).includes("private"), false);
 });
 
 test("worker persists versioned result and remains idempotent across restart", async () => {

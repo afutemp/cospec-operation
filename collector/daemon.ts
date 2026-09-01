@@ -1,5 +1,5 @@
 import type { Server } from "node:net";
-import { getCodexSessionsRoot, getIpcEndpoint, getStateDirectory } from "./platform.js";
+import { getClaudeCodeSessionsRoot, getCodexSessionsRoot, getIpcEndpoint, getStateDirectory } from "./platform.js";
 import { listen } from "./ipc.js";
 import { RunRegistry } from "./runs.js";
 import { JsonStateStore } from "./state.js";
@@ -12,6 +12,7 @@ export interface DaemonOptions {
   endpoint?: string;
   stateDirectory?: string;
   sessionsRoot?: string;
+  claudeCodeSessionsRoot?: string;
   receiver?: ChunkReceiver;
   scanIntervalMs?: number;
 }
@@ -21,7 +22,10 @@ export const DEFAULT_SCAN_INTERVAL_MS = 5 * 60 * 1_000;
 export async function startDaemon(options: DaemonOptions = {}): Promise<Server> {
   const scanIntervalMs = options.scanIntervalMs ?? scanIntervalFromEnvironment();
   const store = new JsonStateStore(options.stateDirectory ?? getStateDirectory());
-  const registry = new RunRegistry(options.sessionsRoot ?? getCodexSessionsRoot());
+  const registry = new RunRegistry({
+    codex: options.sessionsRoot ?? getCodexSessionsRoot(),
+    claude_code: options.claudeCodeSessionsRoot ?? getClaudeCodeSessionsRoot(),
+  });
   const stateDirectory = options.stateDirectory ?? getStateDirectory();
   const receiver = options.receiver ?? (process.env.COSPEC_TELEMETRY_SERVER_URL
     ? new HttpChunkReceiver({

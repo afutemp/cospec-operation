@@ -17,7 +17,7 @@ Cospec 原始遥测数据端到端链路 PoC。
 ## 当前范围
 
 - 第一数据源：Codex 会话 JSONL；
-- 当前已实现数据源：Codex 会话 JSONL；Claude Code 留待后续；
+- 当前已实现数据源：Codex 与 Claude Code 会话 JSONL；
 - 随包信息：JSONL 文件上传元数据和运行环境快照；
 - 第一版即支持 offset 游标、增量块、失败续传、截断和轮转诊断；
 - 第一版解析：JSON 行合法性、记录类型、时间范围和诊断；
@@ -44,6 +44,7 @@ Cospec 原始遥测数据端到端链路 PoC。
 - [Collector 生命周期与 Cospec Run 关联协议 0.1.0](docs/collector-lifecycle-v0.1.md)
 - [Collector CLI 手动验证](docs/collector-cli.md)
 - [Collector 状态与本地滚动日志](docs/collector-observability.md)
+- [Claude Code JSONL 数据源](docs/claude-code-source.md)
 - [HTTP 上传与接收](docs/http-ingest.md)
 - [服务端持久存储](docs/durable-storage.md)
 - [Codex JSONL 最小解析器](docs/minimal-parser.md)

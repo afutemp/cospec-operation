@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { DurableChunkRepository } from "./durable-repository.js";
-import { PARSER_VERSION, parseCodexJsonl } from "./parser.js";
+import { PARSER_VERSION, parseSourceJsonl } from "./parser.js";
 
 export class ParserWorker {
   constructor(private readonly repository: DurableChunkRepository) {}
@@ -16,7 +16,7 @@ export class ParserWorker {
         const bytes = await readFile(chunk.rawPath);
         const hash = createHash("sha256").update(bytes).digest("hex");
         if (hash !== chunk.sha256) throw new ParseInfrastructureError("raw_hash_mismatch");
-        this.repository.saveParseResult(chunk.uploadId, parseCodexJsonl(bytes));
+        this.repository.saveParseResult(chunk.uploadId, parseSourceJsonl(bytes, chunk.sourceType));
         completed += 1;
       } catch (error) {
         const code = error instanceof ParseInfrastructureError

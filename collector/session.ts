@@ -24,6 +24,33 @@ export async function locateCodexSession(root: string, sessionId: string): Promi
   return null;
 }
 
+export async function locateClaudeCodeSession(root: string, sessionId: string): Promise<LocatedSession | null> {
+  const candidates = (await jsonlFiles(root)).filter((path) => path.endsWith(`/${sessionId}.jsonl`) || path.endsWith(`\\${sessionId}.jsonl`));
+  for (const path of candidates) {
+    const sample = await firstBytes(path);
+    let matched = false;
+    let sourceVersion = "unknown";
+    for (const line of sample.split(/\r?\n/)) {
+      if (!line) continue;
+      try {
+        const record = JSON.parse(line) as { sessionId?: unknown; version?: unknown };
+        if (record.sessionId !== sessionId) continue;
+        matched = true;
+        if (typeof record.version === "string" && record.version) sourceVersion = record.version;
+      } catch { continue; }
+    }
+    if (!matched) continue;
+    const info = await stat(path, { bigint: true });
+    return {
+      path: await realpath(path),
+      completeOffset: await lastCompleteLineOffset(path, Number(info.size)),
+      identity: `${info.dev}:${info.ino}:${info.birthtimeNs}`,
+      sourceVersion,
+    };
+  }
+  return null;
+}
+
 async function jsonlFiles(root: string): Promise<string[]> {
   try {
     const entries = await readdir(root, { recursive: true, withFileTypes: true });
@@ -44,6 +71,15 @@ async function firstLine(path: string): Promise<string | null> {
     const newline = buffer.subarray(0, bytesRead).indexOf(0x0a);
     if (newline < 0) return null;
     return buffer.subarray(0, newline).toString("utf8").replace(/\r$/, "");
+  } finally { await handle.close(); }
+}
+
+async function firstBytes(path: string): Promise<string> {
+  const handle = await open(path, "r");
+  try {
+    const buffer = Buffer.alloc(256 * 1024);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, bytesRead).toString("utf8");
   } finally { await handle.close(); }
 }
 

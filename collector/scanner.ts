@@ -80,8 +80,10 @@ function resetGeneration(file: FileState, identity: string, code: "source_trunca
 
 function metadataFor(file: FileState, run: RunBinding, chunk: Awaited<ReturnType<typeof readNextChunk>> & {}): ChunkMetadata {
   const now = new Date().toISOString();
+  const agentType = file.agentType ?? run.agentType ?? "codex";
   return {
-    schema_version: "0.1.0", upload_id: randomUUID(), cospec_run_id: run.cospecRunId, source_type: "codex_jsonl",
+    schema_version: "0.1.0", upload_id: randomUUID(), cospec_run_id: run.cospecRunId,
+    source_type: agentType === "claude_code" ? "claude_code_jsonl" : "codex_jsonl",
     source_version: file.sourceVersion, agent_session_id: file.agentSessionId,
     collected_at: now, collector_version: "0.1.0",
     file: {
@@ -91,7 +93,7 @@ function metadataFor(file: FileState, run: RunBinding, chunk: Awaited<ReturnType
       sha256: chunk.sha256, previous_chunk_sha256: file.previousChunkSha256, ends_with_newline: true,
     },
     environment: {
-      captured_at: now, agent_type: "codex", agent_version: file.sourceVersion,
+      captured_at: now, agent_type: agentType, agent_version: file.sourceVersion,
       os_platform: supportedPlatform(), os_arch: arch(),
       cospec_plugin_version: process.env.COSPEC_PLUGIN_VERSION ?? "unknown",
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",

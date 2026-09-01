@@ -1,6 +1,7 @@
 export const PARSER_VERSION = "0.1.0";
 
-const KNOWN_TYPES = new Set(["session_meta", "event_msg", "response_item", "turn_context", "compacted"]);
+const CODEX_KNOWN_TYPES = new Set(["session_meta", "event_msg", "response_item", "turn_context", "compacted"]);
+const CLAUDE_CODE_KNOWN_TYPES = new Set(["queue-operation", "user", "assistant", "attachment", "last-prompt", "mode"]);
 
 export interface ParseDiagnostic { line: number; byteOffset: number; code: "invalid_json" }
 export interface ParseResult {
@@ -17,6 +18,18 @@ export interface ParseResult {
 }
 
 export function parseCodexJsonl(bytes: Buffer, parserVersion = PARSER_VERSION): ParseResult {
+  return parseJsonl(bytes, CODEX_KNOWN_TYPES, parserVersion);
+}
+
+export function parseClaudeCodeJsonl(bytes: Buffer, parserVersion = PARSER_VERSION): ParseResult {
+  return parseJsonl(bytes, CLAUDE_CODE_KNOWN_TYPES, parserVersion);
+}
+
+export function parseSourceJsonl(bytes: Buffer, sourceType: "codex_jsonl" | "claude_code_jsonl", parserVersion = PARSER_VERSION): ParseResult {
+  return sourceType === "claude_code_jsonl" ? parseClaudeCodeJsonl(bytes, parserVersion) : parseCodexJsonl(bytes, parserVersion);
+}
+
+function parseJsonl(bytes: Buffer, knownTypes: ReadonlySet<string>, parserVersion: string): ParseResult {
   let totalLines = 0;
   let validLines = 0;
   let invalidLines = 0;
@@ -34,7 +47,7 @@ export function parseCodexJsonl(bytes: Buffer, parserVersion = PARSER_VERSION): 
       validLines += 1;
       const type = typeof value.type === "string" ? value.type : "<missing>";
       typeCounts[type] = (typeCounts[type] ?? 0) + 1;
-      if (!KNOWN_TYPES.has(type)) unknownTypeLines += 1;
+      if (!knownTypes.has(type)) unknownTypeLines += 1;
       if (typeof value.timestamp === "string" && Number.isFinite(Date.parse(value.timestamp))) timestamps.push(value.timestamp);
     } catch {
       invalidLines += 1;
