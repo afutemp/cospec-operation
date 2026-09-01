@@ -3,13 +3,22 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "files": [
+    "dist/",
+    "contracts/",
+    "README.md"
+  ],
   "bin": {
-    "cospec-telemetry": "./dist/collector/cli.js"
+    "cospec-telemetry": "./dist/collector/cli.js",
+    "cospec-telemetry-server": "./dist/server/cli.js",
+    "cospec-telemetry-replay": "./dist/server/replay-cli.js"
   },
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
+    "build:package": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.pack.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test dist/**/*.test.js",
+    "prepack": "npm run build:package",
     "server": "node dist/server/cli.js",
     "replay": "node dist/server/replay-cli.js"
   },

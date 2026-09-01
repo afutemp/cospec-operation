@@ -50,9 +50,20 @@ Cospec 原始遥测数据端到端链路 PoC。
 - [只读查询 API](docs/query-api.md)
 - [Linux 真实端到端验收记录](docs/e2e-linux-2026-09-01.md)
 - [集成前运行与冒烟检查](docs/integration-readiness.md)
+- [npm 安装与交付验收记录](docs/package-delivery-2026-09-01.md)
 - [验收场景](docs/acceptance.md)
 - [任务索引](tasks/INDEX.md)
 - [历史方案与验证材料](../operation-platform/tasks/INDEX.md)
+
+## 安装包命令
+
+生成的 npm 包提供三个入口：
+
+- `cospec-telemetry`：Collector 的 `ensure/finish/status/scan/shutdown`；
+- `cospec-telemetry-server`：持久化接收、解析和查询服务；
+- `cospec-telemetry-replay`：手工执行 Run 级解析重放。
+
+本仓库用 `npm pack` 生成本地安装包，当前阶段不发布到公共 registry。
 
 ## 仓库结构
 

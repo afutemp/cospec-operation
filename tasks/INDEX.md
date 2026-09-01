@@ -12,5 +12,6 @@
 | POC-07 | [实现只读查询 API](POC-07-query-api.md) | 已完成 |
 | POC-08 | [完成真实端到端验收](POC-08-e2e-acceptance.md) | 当前环境通过（Windows 待验证） |
 | POC-09 | [固化集成前可运行基线](POC-09-integration-readiness.md) | 已完成 |
+| POC-10 | [验证安装包与命令交付](POC-10-package-delivery.md) | 已完成 |
 
-`POC-01/01A` 已冻结，`POC-02/03/04/05/06/07/09` 已完成；`POC-08` 当前环境验收通过，Windows 实机项保持待验证。协议见 [upload-protocol-v0.1.md](../docs/upload-protocol-v0.1.md) 和 [collector-lifecycle-v0.1.md](../docs/collector-lifecycle-v0.1.md)，JSON Schema位于 `contracts/`。任务编号只在本 PoC 仓库内使用，不与历史 `REC/COL/SRV/UI` 任务混用。
+`POC-01/01A` 已冻结，`POC-02/03/04/05/06/07/09/10` 已完成；`POC-08` 当前环境验收通过，Windows 实机项保持待验证。协议见 [upload-protocol-v0.1.md](../docs/upload-protocol-v0.1.md) 和 [collector-lifecycle-v0.1.md](../docs/collector-lifecycle-v0.1.md)，JSON Schema位于 `contracts/`。任务编号只在本 PoC 仓库内使用，不与历史 `REC/COL/SRV/UI` 任务混用。
