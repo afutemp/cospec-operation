@@ -116,6 +116,8 @@ test("run usage summary reports coverage and supports agent, version, model and 
       role: "user", content: [{ type: "tool_result", tool_use_id: "summary-tool", is_error: false }] } }),
   ].join("\n") + "\n");
   const claude = metadata(claudeBytes, claudeRun, randomUUID(), 0, null);
+  const terminalId = randomUUID();
+  claude.environment.anonymous_terminal_id = terminalId;
   claude.source_type = "claude_code_jsonl"; claude.source_version = "2.1.220";
   claude.environment.agent_type = "claude_code"; claude.environment.agent_version = "2.1.220";
   claude.file.line_count = 3;
@@ -125,6 +127,7 @@ test("run usage summary reports coverage and supports agent, version, model and 
   const codexBytes = Buffer.from(`${JSON.stringify({ type: "event_msg", timestamp: "2026-09-01T01:00:00Z", payload: {
     type: "token_count", info: { last_token_usage: { input_tokens: 20, output_tokens: 5 } } } })}\n`);
   const codex = metadata(codexBytes, codexRun, randomUUID(), 0, null);
+  codex.environment.anonymous_terminal_id = terminalId;
   await repository.accept(codex, codexBytes);
 
   const missingRun = randomUUID();
@@ -140,6 +143,8 @@ test("run usage summary reports coverage and supports agent, version, model and 
     const summary = response.json();
     assert.equal(summary.runs.total, 3);
     assert.deepEqual(summary.runs.byAgent, { claude_code: 1, codex: 2 });
+    assert.deepEqual(summary.terminals, { active_anonymous_terminals: 1, runs_with_terminal_id: 2,
+      runs_missing_terminal_id: 1, run_coverage: 2 / 3 });
     assert.equal(summary.messages.total, 3);
     assert.equal(summary.messages.runs_with_data, 1);
     assert.equal(summary.messages.runs_missing_data, 2);
@@ -170,6 +175,7 @@ test("run usage summary reports coverage and supports agent, version, model and 
       url: "/api/v1/summaries/run-usage?agentType=claude_code&agentVersion=2.1.220&model=claude-test&from=2026-08-30T00:00:00Z&to=2026-08-30T23:59:59Z", headers });
     assert.equal(filtered.statusCode, 200);
     assert.equal(filtered.json().runs.total, 1);
+    assert.equal(filtered.json().terminals.active_anonymous_terminals, 1);
     assert.deepEqual(filtered.json().runs.byAgent, { claude_code: 1 });
     assert.equal((await app.inject({ method: "GET", url: "/api/v1/summaries/run-usage?agentType=other", headers })).statusCode, 400);
     assert.equal((await app.inject({ method: "GET", url: "/api/v1/summaries/run-usage?unknown=x", headers })).statusCode, 400);

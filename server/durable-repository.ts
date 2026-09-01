@@ -394,6 +394,8 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
         THEN json_extract(c.metadata_json,'$.environment.agent_type') END),MIN(json_extract(c.metadata_json,'$.environment.agent_type'))) AS agent_type,
       COALESCE(MIN(CASE WHEN json_extract(c.metadata_json,'$.session.role')='main' OR json_extract(c.metadata_json,'$.session.role') IS NULL
         THEN json_extract(c.metadata_json,'$.environment.agent_version') END),MIN(json_extract(c.metadata_json,'$.environment.agent_version'))) AS agent_version,
+      COALESCE(MIN(CASE WHEN json_extract(c.metadata_json,'$.session.role')='main' OR json_extract(c.metadata_json,'$.session.role') IS NULL
+        THEN json_extract(c.metadata_json,'$.environment.anonymous_terminal_id') END),MIN(json_extract(c.metadata_json,'$.environment.anonymous_terminal_id'))) AS anonymous_terminal_id,
       MIN(c.received_at) AS first_received_at,a.parser_version,
       MIN(CASE WHEN p.parser_version=a.parser_version THEN p.first_timestamp END) AS first_event_at,
       MAX(CASE WHEN p.parser_version=a.parser_version THEN p.last_timestamp END) AS last_event_at,
@@ -475,11 +477,17 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
     const byAgentVersion: Record<string, number> = {};
     const byDay: Record<string, number> = {};
     let runsWithParser = 0;
+    const terminalIds = new Set<string>();
+    let runsWithTerminalId = 0;
     for (const row of selected) {
       increment(byAgent, String(row.agent_type));
       increment(byAgentVersion, `${String(row.agent_type)}@${String(row.agent_version)}`);
       increment(byDay, new Date(Date.parse(String(row.first_event_at ?? row.first_received_at))).toISOString().slice(0, 10));
       if (row.parser_version !== null) runsWithParser += 1;
+      if (typeof row.anonymous_terminal_id === "string" && row.anonymous_terminal_id) {
+        terminalIds.add(row.anonymous_terminal_id);
+        runsWithTerminalId += 1;
+      }
     }
     const messageByRole: Record<string, number> = {};
     const messageRuns = new Set<string>();
@@ -515,6 +523,9 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
       timeSemantics: "first_jsonl_event_fallback_first_received",
       runs: { total: selected.length, with_parser_facts: runsWithParser, without_parser_facts: selected.length - runsWithParser,
         byAgent, byAgentVersion, byDay },
+      terminals: { active_anonymous_terminals: terminalIds.size, runs_with_terminal_id: runsWithTerminalId,
+        runs_missing_terminal_id: selected.length - runsWithTerminalId,
+        run_coverage: selected.length === 0 ? null : runsWithTerminalId / selected.length },
       messages: coverageSummary(selected.length, messageRuns.size, { total: messageTotal, byRole: messageByRole,
         average_per_observed_run: messageRuns.size ? messageTotal / messageRuns.size : null }),
       tokens: coverageSummary(selected.length, tokenRuns.size, { ...tokenTotals,

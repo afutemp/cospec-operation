@@ -89,6 +89,10 @@ Collector 只在收到并验证成功响应后推进本地 `confirmed_offset`。
 
 ## 本地状态
 
+Collector 首次启动时在用户级状态目录创建独立的 `installation.json`，其中只保存随机生成的 `anonymous_terminal_id` 和创建时间。该文件不位于插件或 Collector 版本目录，因此正常升级不会改变 ID。删除本地状态、换操作系统用户、重装系统或文件损坏后会生成新 ID；它表示一个用户级 Collector 安装，不宣称是永久物理设备标识。
+
+终端 ID 使用 Node.js `crypto.randomUUID()` 生成，不读取或散列机器名、MAC 地址、磁盘序列号等设备指纹。每个新上传块在 `environment.anonymous_terminal_id` 中携带该值；字段保持可选，以兼容已经存在的旧 Collector 和旧原始块。
+
 ```json
 {
   "files": {

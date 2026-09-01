@@ -86,6 +86,6 @@ export interface ChunkMetadata {
   environment: {
     captured_at: string; agent_type: AgentType; agent_version: string;
     os_platform: "linux" | "darwin" | "win32"; os_arch: string;
-    cospec_plugin_version: string; timezone: string;
+    cospec_plugin_version: string; timezone: string; anonymous_terminal_id?: string;
   };
 }

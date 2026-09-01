@@ -58,6 +58,7 @@ GET /api/v1/summaries/run-usage?from=2026-09-01T00:00:00Z&to=2026-09-01T23:59:59
 可选筛选条件为 `from`、`to`、`agentType`、`agentVersion` 和 `model`。接口返回：
 
 - Run 总数，以及按 Agent、Agent 版本和日期的分布；
+- 活跃匿名终端数，以及有／无终端 ID 的 Run 数和覆盖率；
 - 用户/Agent 消息数量；
 - 输入、输出、缓存读取、缓存写入、推理输出和宿主报告总量等 Token；
 - 按模型统计的 Run 数、记录数和 Token；

@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, rename, stat, writeFile } from "node:fs/promises";
 import { arch, platform } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { readNextChunk } from "./chunk.js";
 import { JsonStateStore } from "./state.js";
+import { TerminalIdentityStore } from "./terminal-identity.js";
 import type { ChunkMetadata, CollectorState, FileState, RunBinding } from "./types.js";
 
 export interface ChunkReceiver { accept(metadata: ChunkMetadata, bytes: Buffer): Promise<void> }
@@ -31,10 +32,15 @@ async function atomicWrite(path: string, bytes: Buffer): Promise<void> {
 }
 
 export class CollectorScanner {
-  constructor(private readonly store: JsonStateStore, private readonly receiver: ChunkReceiver) {}
+  private readonly terminalIdentity: TerminalIdentityStore;
+
+  constructor(private readonly store: JsonStateStore, private readonly receiver: ChunkReceiver) {
+    this.terminalIdentity = new TerminalIdentityStore(dirname(store.path));
+  }
 
   async scan(): Promise<{ chunks: number; bytes: number }> {
     const state = await this.store.load();
+    const anonymousTerminalId = await this.terminalIdentity.getOrCreate();
     let chunks = 0;
     let bytes = 0;
     let firstError: unknown;
@@ -55,7 +61,7 @@ export class CollectorScanner {
           if (maximumEnd !== undefined && file.confirmedOffset >= maximumEnd) break;
           const chunk = await readNextChunk(file.canonicalPath, file.confirmedOffset, maximumEnd);
           if (!chunk) break;
-          const metadata = file.pendingUpload ?? metadataFor(file, run, chunk);
+          const metadata = file.pendingUpload ?? metadataFor(file, run, chunk, anonymousTerminalId);
           if (metadata.file.start_offset !== chunk.startOffset || metadata.file.end_offset !== chunk.endOffset || metadata.file.sha256 !== chunk.sha256) {
             throw new Error("source_changed_during_retry");
           }
@@ -87,7 +93,7 @@ function resetGeneration(file: FileState, identity: string, code: "source_trunca
   file.lastDiagnostic = { code, observedAt: new Date().toISOString() };
 }
 
-function metadataFor(file: FileState, run: RunBinding, chunk: Awaited<ReturnType<typeof readNextChunk>> & {}): ChunkMetadata {
+function metadataFor(file: FileState, run: RunBinding, chunk: Awaited<ReturnType<typeof readNextChunk>> & {}, anonymousTerminalId: string): ChunkMetadata {
   const now = new Date().toISOString();
   const agentType = file.agentType ?? run.agentType ?? "codex";
   return {
@@ -110,6 +116,7 @@ function metadataFor(file: FileState, run: RunBinding, chunk: Awaited<ReturnType
       os_platform: supportedPlatform(), os_arch: arch(),
       cospec_plugin_version: process.env.COSPEC_PLUGIN_VERSION ?? "unknown",
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+      anonymous_terminal_id: anonymousTerminalId,
     },
   };
 }
