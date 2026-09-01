@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cospec.local/schemas/cospec-run-binding-0.1.0.json",
+  "title": "Cospec run to agent session binding",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "cospec_run_id",
+    "agent_type",
+    "agent_session_id",
+    "source_file_id",
+    "generation",
+    "start_offset",
+    "end_offset",
+    "started_at",
+    "ended_at",
+    "status"
+  ],
+  "properties": {
+    "schema_version": { "const": "0.1.0" },
+    "cospec_run_id": { "type": "string", "format": "uuid" },
+    "agent_type": { "enum": ["codex", "claude_code"] },
+    "agent_session_id": { "type": "string", "minLength": 1, "maxLength": 255 },
+    "source_file_id": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "format": "uuid" }
+      ]
+    },
+    "generation": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "integer", "minimum": 1 }
+      ]
+    },
+    "start_offset": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "integer", "minimum": 0 }
+      ]
+    },
+    "end_offset": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "integer", "minimum": 0 }
+      ]
+    },
+    "started_at": { "type": "string", "format": "date-time" },
+    "ended_at": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "format": "date-time" }
+      ]
+    },
+    "status": { "enum": ["pending", "open", "completed", "failed", "interrupted"] }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "pending" } } },
+      "then": {
+        "properties": {
+          "source_file_id": { "type": "null" },
+          "generation": { "type": "null" },
+          "start_offset": { "type": "null" },
+          "end_offset": { "type": "null" },
+          "ended_at": { "type": "null" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "open" } } },
+      "then": {
+        "properties": {
+          "source_file_id": { "type": "string", "format": "uuid" },
+          "generation": { "type": "integer", "minimum": 1 },
+          "start_offset": { "type": "integer", "minimum": 0 },
+          "end_offset": { "type": "null" },
+          "ended_at": { "type": "null" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": { "enum": ["completed", "failed", "interrupted"] }
+        }
+      },
+      "then": {
+        "properties": {
+          "source_file_id": { "type": "string", "format": "uuid" },
+          "generation": { "type": "integer", "minimum": 1 },
+          "start_offset": { "type": "integer", "minimum": 0 },
+          "end_offset": { "type": "integer", "minimum": 0 },
+          "ended_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  ]
+}

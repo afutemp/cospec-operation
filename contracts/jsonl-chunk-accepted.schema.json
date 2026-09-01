@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cospec.local/schemas/jsonl-chunk-accepted-0.1.0.json",
+  "title": "Cospec JSONL chunk accepted response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "upload_id",
+    "source_file_id",
+    "generation",
+    "accepted_start_offset",
+    "accepted_end_offset",
+    "next_offset",
+    "status"
+  ],
+  "properties": {
+    "upload_id": { "type": "string", "format": "uuid" },
+    "source_file_id": { "type": "string", "format": "uuid" },
+    "generation": { "type": "integer", "minimum": 1 },
+    "accepted_start_offset": { "type": "integer", "minimum": 0 },
+    "accepted_end_offset": { "type": "integer", "minimum": 1 },
+    "next_offset": { "type": "integer", "minimum": 1 },
+    "status": { "enum": ["accepted", "already_accepted"] }
+  }
+}
+

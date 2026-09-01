@@ -1,0 +1,29 @@
+{
+  "name": "cospec-telemetry-pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "cospec-telemetry": "./dist/collector/cli.js"
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/**/*.test.js",
+    "server": "node dist/server/cli.js",
+    "replay": "node dist/server/replay-cli.js"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@fastify/multipart": "^10.1.1",
+    "fastify": "^5.12.1"
+  }
+}

@@ -1,0 +1,25 @@
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Raw or generated telemetry
+fixtures/private/
+data/
+uploads/
+storage/
+tmp/
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+coverage/
+
+# Editor and OS
+.DS_Store
+.idea/
+.vscode/
+

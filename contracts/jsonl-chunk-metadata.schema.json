@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cospec.local/schemas/jsonl-chunk-metadata-0.1.0.json",
+  "title": "Cospec JSONL chunk upload metadata",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "upload_id",
+    "cospec_run_id",
+    "source_type",
+    "source_version",
+    "agent_session_id",
+    "collected_at",
+    "collector_version",
+    "file",
+    "environment"
+  ],
+  "properties": {
+    "schema_version": { "const": "0.1.0" },
+    "upload_id": { "type": "string", "format": "uuid" },
+    "cospec_run_id": { "type": "string", "format": "uuid" },
+    "source_type": { "enum": ["codex_jsonl", "claude_code_jsonl"] },
+    "source_version": { "type": "string", "minLength": 1 },
+    "agent_session_id": { "type": "string", "minLength": 1, "maxLength": 255 },
+    "collected_at": { "type": "string", "format": "date-time" },
+    "collector_version": { "type": "string", "minLength": 1 },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_file_id",
+        "generation",
+        "start_offset",
+        "end_offset",
+        "byte_count",
+        "line_count",
+        "sha256",
+        "previous_chunk_sha256",
+        "ends_with_newline"
+      ],
+      "properties": {
+        "source_file_id": { "type": "string", "format": "uuid" },
+        "generation": { "type": "integer", "minimum": 1 },
+        "path_hint": { "type": "string", "maxLength": 255 },
+        "start_offset": { "type": "integer", "minimum": 0 },
+        "end_offset": { "type": "integer", "minimum": 1 },
+        "byte_count": { "type": "integer", "minimum": 1, "maximum": 10485760 },
+        "line_count": { "type": "integer", "minimum": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "previous_chunk_sha256": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+          ]
+        },
+        "ends_with_newline": { "const": true }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "captured_at",
+        "agent_type",
+        "agent_version",
+        "os_platform",
+        "os_arch",
+        "cospec_plugin_version",
+        "timezone"
+      ],
+      "properties": {
+        "captured_at": { "type": "string", "format": "date-time" },
+        "agent_type": { "enum": ["codex", "claude_code"] },
+        "agent_version": { "type": "string", "minLength": 1 },
+        "os_platform": { "enum": ["linux", "darwin", "win32"] },
+        "os_arch": { "type": "string", "minLength": 1 },
+        "cospec_plugin_version": { "type": "string", "minLength": 1 },
+        "timezone": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
