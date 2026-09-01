@@ -34,6 +34,14 @@ GET /api/v1/runs/:runId/replays
 
 返回任务 ID、目标版本、状态、块计数、失败码和起止时间。接口只读，不提供重放触发。
 
+## 宿主资源与工具事实
+
+```http
+GET /api/v1/runs/:runId/facts
+```
+
+返回活动解析器版本的消息、Token、工具调用/结果和宿主记录时间跨度。字段与指标边界见 [宿主资源与工具事实 0.2](host-resource-facts-v0.2.md)。
+
 ## 数据边界
 
 API 不返回消息正文、工具参数、工具输出、原始 JSONL、`path_hint` 或服务端绝对路径。本阶段不提供 HTML 页面；使用接口测试、curl 或其他 HTTP 客户端验证。

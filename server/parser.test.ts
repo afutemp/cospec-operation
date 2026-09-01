@@ -28,14 +28,41 @@ test("Claude Code parser recognizes current control and message types without re
   const bytes = Buffer.from([
     JSON.stringify({ type: "queue-operation", sessionId: "session", content: "not retained" }),
     JSON.stringify({ type: "user", sessionId: "session", version: "2.1.220", timestamp: "2026-09-01T01:00:00Z", message: { content: "private" } }),
-    JSON.stringify({ type: "assistant", sessionId: "session", version: "2.1.220", timestamp: "2026-09-01T01:00:01Z" }),
+    JSON.stringify({ type: "assistant", sessionId: "session", version: "2.1.220", timestamp: "2026-09-01T01:00:01Z",
+      message: { role: "assistant", model: "claude-test", usage: { input_tokens: 10, output_tokens: 3, cache_read_input_tokens: 4, cache_creation_input_tokens: 2 },
+        content: [{ type: "tool_use", id: "tool-1", name: "Read", input: { secret: "private" } }] } }),
+    JSON.stringify({ type: "user", sessionId: "session", timestamp: "2026-09-01T01:00:02Z",
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: "tool-1", is_error: true, content: "private output" }] } }),
     JSON.stringify({ type: "future-claude-type", sessionId: "session" }),
   ].join("\n") + "\n");
   const result = parseClaudeCodeJsonl(bytes);
-  assert.equal(result.validLines, 4);
+  assert.equal(result.validLines, 5);
   assert.equal(result.unknownTypeLines, 1);
-  assert.deepEqual(result.typeCounts, { "queue-operation": 1, user: 1, assistant: 1, "future-claude-type": 1 });
+  assert.deepEqual(result.typeCounts, { "queue-operation": 1, user: 2, assistant: 1, "future-claude-type": 1 });
   assert.equal(result.firstTimestamp, "2026-09-01T01:00:00Z");
+  assert.equal(JSON.stringify(result).includes("private"), false);
+  assert.deepEqual(result.messageFacts.map((fact) => fact.role), ["user", "assistant", "user"]);
+  assert.deepEqual(result.tokenUsageFacts[0], { recordIndex: 3, timestamp: "2026-09-01T01:00:01Z", model: "claude-test",
+    inputTokens: 10, outputTokens: 3, cacheReadInputTokens: 4, cacheWriteOrCreationInputTokens: 2,
+    reasoningOutputTokens: null, reportedTotalTokens: null });
+  assert.deepEqual(result.toolCallFacts[0], { recordIndex: 3, itemIndex: 0, timestamp: "2026-09-01T01:00:01Z", callId: "tool-1", toolName: "Read" });
+  assert.deepEqual(result.toolResultFacts[0], { recordIndex: 4, itemIndex: 0, timestamp: "2026-09-01T01:00:02Z", callId: "tool-1", status: "failure", failureCode: "explicit_is_error" });
+});
+
+test("Codex facts retain resource metadata and only direct tool failure evidence", () => {
+  const bytes = Buffer.from([
+    JSON.stringify({ type: "response_item", timestamp: "2026-09-01T01:00:00Z", payload: { type: "message", role: "user", content: "private" } }),
+    JSON.stringify({ type: "event_msg", timestamp: "2026-09-01T01:00:01Z", payload: { type: "token_count", info: { last_token_usage: {
+      input_tokens: 20, output_tokens: 5, cached_input_tokens: 7, cache_write_input_tokens: 1, reasoning_output_tokens: 2, total_tokens: 25 } } } }),
+    JSON.stringify({ type: "response_item", timestamp: "2026-09-01T01:00:02Z", payload: { type: "custom_tool_call", call_id: "call-1", name: "exec", input: "private args" } }),
+    JSON.stringify({ type: "response_item", timestamp: "2026-09-01T01:00:03Z", payload: { type: "custom_tool_call_output", call_id: "call-1", output: [{ exit_code: 2, output: "private output" }] } }),
+    JSON.stringify({ type: "response_item", timestamp: "2026-09-01T01:00:04Z", payload: { type: "custom_tool_call_output", call_id: "call-unknown", output: "unstructured private" } }),
+  ].join("\n") + "\n");
+  const result = parseCodexJsonl(bytes);
+  assert.equal(result.messageFacts.length, 1);
+  assert.equal(result.tokenUsageFacts[0]?.reportedTotalTokens, 25);
+  assert.equal(result.toolCallFacts[0]?.toolName, "exec");
+  assert.deepEqual(result.toolResultFacts.map((fact) => fact.status), ["failure", "unknown"]);
   assert.equal(JSON.stringify(result).includes("private"), false);
 });
 
@@ -73,17 +100,72 @@ test("worker marks a modified immutable raw block as failed", async () => {
   repository.close();
 });
 
-function metadata(bytes: Buffer): ChunkMetadata {
+test("worker persists versioned facts and exposes Run-level metric inputs", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cospec-parser-facts-"));
+  const bytes = Buffer.from([
+    JSON.stringify({ type: "assistant", timestamp: "2026-09-01T01:00:00Z", message: { role: "assistant", model: "claude-test",
+      usage: { input_tokens: 11, output_tokens: 4, cache_read_input_tokens: 3 }, content: [{ type: "tool_use", id: "tool-1", name: "Bash", input: "private" }] } }),
+    JSON.stringify({ type: "user", timestamp: "2026-09-01T01:00:01Z", message: { role: "user",
+      content: [{ type: "tool_result", tool_use_id: "tool-1", is_error: false, content: "private" }] } }),
+  ].join("\n") + "\n");
+  const value = metadata(bytes);
+  value.source_type = "claude_code_jsonl";
+  value.source_version = "2.1.220";
+  value.environment.agent_type = "claude_code";
+  value.environment.agent_version = "2.1.220";
+  const repository = await DurableChunkRepository.open(root);
+  await repository.accept(value, bytes);
+  await new ParserWorker(repository).runPending();
+  const facts = repository.getRunFacts(value.cospec_run_id)! as {
+    messages: { total: number; byRole: Record<string, number> };
+    tokens: Record<string, number | null>; tools: Record<string, number | null>;
+    attribution: { skill: string }; interval: { semantics: string };
+  };
+  assert.deepEqual(facts.messages, { total: 2, byRole: { assistant: 1, user: 1 } });
+  assert.equal(facts.tokens.input_tokens, 11);
+  assert.equal(facts.tokens.cache_read_input_tokens, 3);
+  assert.equal(facts.tokens.reported_total_tokens, null);
+  assert.deepEqual(facts.tools, { calls: 1, successes: 1, failures: 0, unknown_results: 0,
+    byTool: { Bash: { calls: 1, successes: 1, failures: 0, unknown_results: 0 } } });
+  assert.equal(facts.attribution.skill, "unavailable");
+  assert.equal(facts.interval.semantics, "host_record_span");
+  assert.equal(JSON.stringify(facts).includes("private"), false);
+  repository.close();
+});
+
+test("Run facts pair tool calls and direct failures across raw chunk boundaries", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cospec-cross-chunk-facts-"));
+  const runId = randomUUID();
+  const sourceFileId = randomUUID();
+  const firstBytes = Buffer.from(`${JSON.stringify({ type: "assistant", timestamp: "2026-09-01T01:00:00Z",
+    message: { role: "assistant", content: [{ type: "tool_use", id: "cross-call", name: "Bash", input: "private" }] } })}\n`);
+  const first = metadata(firstBytes, runId, 100, null, sourceFileId);
+  first.source_type = "claude_code_jsonl"; first.environment.agent_type = "claude_code";
+  const secondBytes = Buffer.from(`${JSON.stringify({ type: "user", timestamp: "2026-09-01T01:00:01Z",
+    message: { role: "user", content: [{ type: "tool_result", tool_use_id: "cross-call", is_error: true, content: "private" }] } })}\n`);
+  const second = metadata(secondBytes, runId, first.file.end_offset, first.file.sha256, sourceFileId);
+  second.source_type = "claude_code_jsonl"; second.environment.agent_type = "claude_code";
+  const repository = await DurableChunkRepository.open(root);
+  await repository.accept(first, firstBytes);
+  await repository.accept(second, secondBytes);
+  await new ParserWorker(repository).runPending();
+  const tools = (repository.getRunFacts(runId) as { tools: { byTool: Record<string, Record<string, number>> } }).tools;
+  assert.deepEqual(tools.byTool.Bash, { calls: 1, successes: 0, failures: 1, unknown_results: 0 });
+  assert.equal(JSON.stringify(repository.getRunFacts(runId)).includes("private"), false);
+  repository.close();
+});
+
+function metadata(bytes: Buffer, runId = randomUUID(), startOffset = 100, previousHash: string | null = null, sourceFileId = randomUUID()): ChunkMetadata {
   const now = new Date().toISOString();
   return {
-    schema_version: "0.1.0", upload_id: randomUUID(), cospec_run_id: randomUUID(),
+    schema_version: "0.1.0", upload_id: randomUUID(), cospec_run_id: runId,
     source_type: "codex_jsonl", source_version: "0.150.1", agent_session_id: randomUUID(),
     collected_at: now, collector_version: "0.1.0",
     file: {
-      source_file_id: randomUUID(), generation: 1, path_hint: "redacted.jsonl",
-      start_offset: 100, end_offset: 100 + bytes.length, byte_count: bytes.length,
+      source_file_id: sourceFileId, generation: 1, path_hint: "redacted.jsonl",
+      start_offset: startOffset, end_offset: startOffset + bytes.length, byte_count: bytes.length,
       line_count: bytes.reduce((count, byte) => count + (byte === 0x0a ? 1 : 0), 0),
-      sha256: createHash("sha256").update(bytes).digest("hex"), previous_chunk_sha256: null, ends_with_newline: true,
+      sha256: createHash("sha256").update(bytes).digest("hex"), previous_chunk_sha256: previousHash, ends_with_newline: true,
     },
     environment: {
       captured_at: now, agent_type: "codex", agent_version: "0.150.1", os_platform: "linux", os_arch: "x64",

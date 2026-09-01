@@ -41,7 +41,7 @@ test("read-only query API returns active-version summaries without content or pa
   const secondBytes = Buffer.from('{"type":"future_type","timestamp":"2026-09-01T02:00:00Z"}\n');
   await repository.accept(metadata(secondBytes, runId, sourceFileId, first.file.end_offset, first.file.sha256), secondBytes);
   await new ParserWorker(repository).runPending();
-  await new ReplayService(repository, new ParserRegistry({ "0.2.0": (bytes) => parseCodexJsonl(bytes, "0.2.0") })).replayRun(runId, "0.2.0");
+  await new ReplayService(repository, new ParserRegistry({ "0.3.0": (bytes) => parseCodexJsonl(bytes, "0.3.0") })).replayRun(runId, "0.3.0");
 
   const app = await createIngestApp({ bearerToken: TOKEN, repository, queryRepository: repository });
   try {
@@ -53,7 +53,9 @@ test("read-only query API returns active-version summaries without content or pa
 
     const detail = await app.inject({ method: "GET", url: `/api/v1/runs/${runId}`, headers });
     assert.equal(detail.statusCode, 200);
-    assert.equal(detail.json().activeParserVersion, "0.2.0");
+    assert.equal(detail.json().agentType, "codex");
+    assert.equal(detail.json().sourceVersion, "0.150.1");
+    assert.equal(detail.json().activeParserVersion, "0.3.0");
     assert.equal(detail.json().totalLines, 2);
     assert.deepEqual(detail.json().typeCounts, { event_msg: 1, future_type: 1 });
     assert.equal(detail.body.includes("DO_NOT_RETURN"), false);
@@ -66,10 +68,18 @@ test("read-only query API returns active-version summaries without content or pa
     assert.equal(chunks.body.includes("private.jsonl"), false);
 
     const replays = await app.inject({ method: "GET", url: `/api/v1/runs/${runId}/replays`, headers });
-    assert.equal(replays.json().items[0].targetVersion, "0.2.0");
+    assert.equal(replays.json().items[0].targetVersion, "0.3.0");
     assert.equal(replays.json().items[0].status, "completed");
 
+    const facts = await app.inject({ method: "GET", url: `/api/v1/runs/${runId}/facts`, headers });
+    assert.equal(facts.statusCode, 200);
+    assert.equal(facts.json().parserVersion, "0.3.0");
+    assert.equal(facts.json().messages.total, 0);
+    assert.equal(facts.json().attribution.skill, "unavailable");
+    assert.equal(facts.body.includes("DO_NOT_RETURN"), false);
+
     assert.equal((await app.inject({ method: "GET", url: "/api/v1/runs" })).statusCode, 401);
+    assert.equal((await app.inject({ method: "GET", url: `/api/v1/runs/${runId}/facts` })).statusCode, 401);
     assert.equal((await app.inject({ method: "GET", url: "/api/v1/runs?limit=0", headers })).statusCode, 400);
     assert.equal((await app.inject({ method: "GET", url: `/api/v1/runs/${randomUUID()}`, headers })).statusCode, 404);
   } finally { await app.close(); repository.close(); }

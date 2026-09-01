@@ -1,9 +1,20 @@
-export const PARSER_VERSION = "0.1.0";
+export const PARSER_VERSION = "0.2.0";
 
 const CODEX_KNOWN_TYPES = new Set(["session_meta", "event_msg", "response_item", "turn_context", "compacted"]);
 const CLAUDE_CODE_KNOWN_TYPES = new Set(["queue-operation", "user", "assistant", "attachment", "last-prompt", "mode"]);
 
 export interface ParseDiagnostic { line: number; byteOffset: number; code: "invalid_json" }
+export interface MessageFact { recordIndex: number; timestamp: string | null; role: string; model: string | null }
+export interface TokenUsageFact {
+  recordIndex: number; timestamp: string | null; model: string | null;
+  inputTokens: number | null; outputTokens: number | null; cacheReadInputTokens: number | null;
+  cacheWriteOrCreationInputTokens: number | null; reasoningOutputTokens: number | null; reportedTotalTokens: number | null;
+}
+export interface ToolCallFact { recordIndex: number; itemIndex: number; timestamp: string | null; callId: string; toolName: string }
+export interface ToolResultFact {
+  recordIndex: number; itemIndex: number; timestamp: string | null; callId: string;
+  status: "success" | "failure" | "unknown"; failureCode: "nonzero_exit_code" | "explicit_is_error" | null;
+}
 export interface ParseResult {
   parserVersion: string;
   status: "completed" | "completed_with_errors";
@@ -15,6 +26,10 @@ export interface ParseResult {
   firstTimestamp: string | null;
   lastTimestamp: string | null;
   diagnostics: ParseDiagnostic[];
+  messageFacts: MessageFact[];
+  tokenUsageFacts: TokenUsageFact[];
+  toolCallFacts: ToolCallFact[];
+  toolResultFacts: ToolResultFact[];
 }
 
 export function parseCodexJsonl(bytes: Buffer, parserVersion = PARSER_VERSION): ParseResult {
@@ -38,17 +53,23 @@ function parseJsonl(bytes: Buffer, knownTypes: ReadonlySet<string>, parserVersio
   const typeCounts: Record<string, number> = {};
   const diagnostics: ParseDiagnostic[] = [];
   const timestamps: string[] = [];
+  const messageFacts: MessageFact[] = [];
+  const tokenUsageFacts: TokenUsageFact[] = [];
+  const toolCallFacts: ToolCallFact[] = [];
+  const toolResultFacts: ToolResultFact[] = [];
   for (let index = 0; index < bytes.length; index += 1) {
     if (bytes[index] !== 0x0a) continue;
     totalLines += 1;
     const line = bytes.subarray(lineStart, index).toString("utf8").replace(/\r$/, "");
     try {
-      const value = JSON.parse(line) as { type?: unknown; timestamp?: unknown };
+      const value = JSON.parse(line) as Record<string, unknown>;
       validLines += 1;
       const type = typeof value.type === "string" ? value.type : "<missing>";
       typeCounts[type] = (typeCounts[type] ?? 0) + 1;
       if (!knownTypes.has(type)) unknownTypeLines += 1;
       if (typeof value.timestamp === "string" && Number.isFinite(Date.parse(value.timestamp))) timestamps.push(value.timestamp);
+      if (knownTypes === CODEX_KNOWN_TYPES) extractCodexFacts(value, totalLines, messageFacts, tokenUsageFacts, toolCallFacts, toolResultFacts);
+      else extractClaudeCodeFacts(value, totalLines, messageFacts, tokenUsageFacts, toolCallFacts, toolResultFacts);
     } catch {
       invalidLines += 1;
       diagnostics.push({ line: totalLines, byteOffset: lineStart, code: "invalid_json" });
@@ -62,6 +83,83 @@ function parseJsonl(bytes: Buffer, knownTypes: ReadonlySet<string>, parserVersio
     totalLines, validLines, invalidLines, unknownTypeLines, typeCounts,
     firstTimestamp: timestamps[0] ?? null,
     lastTimestamp: timestamps.at(-1) ?? null,
-    diagnostics,
+    diagnostics, messageFacts, tokenUsageFacts, toolCallFacts, toolResultFacts,
   };
+}
+
+function extractCodexFacts(value: Record<string, unknown>, recordIndex: number, messages: MessageFact[], tokens: TokenUsageFact[], calls: ToolCallFact[], results: ToolResultFact[]): void {
+  const timestamp = validTimestamp(value.timestamp);
+  const payload = object(value.payload);
+  if (!payload) return;
+  if (value.type === "response_item" && payload.type === "message" && typeof payload.role === "string") {
+    messages.push({ recordIndex, timestamp, role: payload.role, model: null });
+  }
+  if (value.type === "event_msg" && payload.type === "token_count") {
+    const usage = object(object(payload.info)?.last_token_usage);
+    if (usage) tokens.push(tokenFact(recordIndex, timestamp, null, usage, "codex"));
+  }
+  if (value.type !== "response_item") return;
+  if ((payload.type === "custom_tool_call" || payload.type === "function_call") && typeof payload.call_id === "string" && typeof payload.name === "string") {
+    calls.push({ recordIndex, itemIndex: 0, timestamp, callId: payload.call_id, toolName: payload.name });
+  }
+  if ((payload.type === "custom_tool_call_output" || payload.type === "function_call_output") && typeof payload.call_id === "string") {
+    const exitCode = findExitCode(payload.output);
+    results.push({ recordIndex, itemIndex: 0, timestamp, callId: payload.call_id,
+      status: exitCode === null ? "unknown" : exitCode === 0 ? "success" : "failure",
+      failureCode: exitCode !== null && exitCode !== 0 ? "nonzero_exit_code" : null });
+  }
+}
+
+function extractClaudeCodeFacts(value: Record<string, unknown>, recordIndex: number, messages: MessageFact[], tokens: TokenUsageFact[], calls: ToolCallFact[], results: ToolResultFact[]): void {
+  const timestamp = validTimestamp(value.timestamp);
+  const message = object(value.message);
+  if (!message) return;
+  const role = typeof message.role === "string" ? message.role : typeof value.type === "string" ? value.type : null;
+  const model = typeof message.model === "string" ? message.model : null;
+  if ((value.type === "user" || value.type === "assistant") && role) messages.push({ recordIndex, timestamp, role, model });
+  const usage = object(message.usage);
+  if (usage) tokens.push(tokenFact(recordIndex, timestamp, model, usage, "claude_code"));
+  if (!Array.isArray(message.content)) return;
+  message.content.forEach((item, itemIndex) => {
+    const block = object(item);
+    if (!block) return;
+    if (block.type === "tool_use" && typeof block.id === "string" && typeof block.name === "string") {
+      calls.push({ recordIndex, itemIndex, timestamp, callId: block.id, toolName: block.name });
+    }
+    if (block.type === "tool_result" && typeof block.tool_use_id === "string") {
+      const explicit = typeof block.is_error === "boolean" ? block.is_error : null;
+      results.push({ recordIndex, itemIndex, timestamp, callId: block.tool_use_id,
+        status: explicit === null ? "unknown" : explicit ? "failure" : "success",
+        failureCode: explicit ? "explicit_is_error" : null });
+    }
+  });
+}
+
+function tokenFact(recordIndex: number, timestamp: string | null, model: string | null, usage: Record<string, unknown>, source: "codex" | "claude_code"): TokenUsageFact {
+  return {
+    recordIndex, timestamp, model,
+    inputTokens: integer(usage.input_tokens), outputTokens: integer(usage.output_tokens),
+    cacheReadInputTokens: integer(source === "codex" ? usage.cached_input_tokens : usage.cache_read_input_tokens),
+    cacheWriteOrCreationInputTokens: integer(source === "codex" ? usage.cache_write_input_tokens : usage.cache_creation_input_tokens),
+    reasoningOutputTokens: integer(usage.reasoning_output_tokens), reportedTotalTokens: integer(usage.total_tokens),
+  };
+}
+
+function object(value: unknown): Record<string, unknown> | null { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null; }
+function integer(value: unknown): number | null { return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null; }
+function validTimestamp(value: unknown): string | null { return typeof value === "string" && Number.isFinite(Date.parse(value)) ? value : null; }
+
+function findExitCode(value: unknown, depth = 0): number | null {
+  if (depth > 4) return null;
+  const record = object(value);
+  if (record) {
+    const direct = integer(record.exit_code);
+    if (direct !== null) return direct;
+    for (const nested of Object.values(record)) { const found = findExitCode(nested, depth + 1); if (found !== null) return found; }
+  } else if (Array.isArray(value)) {
+    for (const nested of value) { const found = findExitCode(nested, depth + 1); if (found !== null) return found; }
+  } else if (typeof value === "string" && value.length <= 1_000_000) {
+    try { return findExitCode(JSON.parse(value), depth + 1); } catch { return null; }
+  }
+  return null;
 }

@@ -44,6 +44,27 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
       CREATE TABLE IF NOT EXISTS active_parser_versions (
         cospec_run_id TEXT PRIMARY KEY, parser_version TEXT NOT NULL, activated_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS message_facts (
+        upload_id TEXT NOT NULL, parser_version TEXT NOT NULL, record_index INTEGER NOT NULL,
+        timestamp TEXT, role TEXT NOT NULL, model TEXT,
+        PRIMARY KEY(upload_id,parser_version,record_index), FOREIGN KEY(upload_id) REFERENCES chunks(upload_id)
+      );
+      CREATE TABLE IF NOT EXISTS token_usage_facts (
+        upload_id TEXT NOT NULL, parser_version TEXT NOT NULL, record_index INTEGER NOT NULL,
+        timestamp TEXT, model TEXT, input_tokens INTEGER, output_tokens INTEGER, cache_read_input_tokens INTEGER,
+        cache_write_or_creation_input_tokens INTEGER, reasoning_output_tokens INTEGER, reported_total_tokens INTEGER,
+        PRIMARY KEY(upload_id,parser_version,record_index), FOREIGN KEY(upload_id) REFERENCES chunks(upload_id)
+      );
+      CREATE TABLE IF NOT EXISTS tool_call_facts (
+        upload_id TEXT NOT NULL, parser_version TEXT NOT NULL, record_index INTEGER NOT NULL, item_index INTEGER NOT NULL,
+        timestamp TEXT, call_id TEXT NOT NULL, tool_name TEXT NOT NULL,
+        PRIMARY KEY(upload_id,parser_version,record_index,item_index), FOREIGN KEY(upload_id) REFERENCES chunks(upload_id)
+      );
+      CREATE TABLE IF NOT EXISTS tool_result_facts (
+        upload_id TEXT NOT NULL, parser_version TEXT NOT NULL, record_index INTEGER NOT NULL, item_index INTEGER NOT NULL,
+        timestamp TEXT, call_id TEXT NOT NULL, status TEXT NOT NULL, failure_code TEXT,
+        PRIMARY KEY(upload_id,parser_version,record_index,item_index), FOREIGN KEY(upload_id) REFERENCES chunks(upload_id)
+      );
       CREATE TABLE IF NOT EXISTS replay_jobs (
         job_id TEXT PRIMARY KEY, cospec_run_id TEXT NOT NULL, target_version TEXT NOT NULL,
         status TEXT NOT NULL, total_chunks INTEGER NOT NULL, completed_chunks INTEGER NOT NULL DEFAULT 0,
@@ -82,6 +103,7 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
         result.firstTimestamp, result.lastTimestamp, JSON.stringify(result.diagnostics), new Date().toISOString(),
       );
       this.database.prepare("UPDATE chunks SET parser_status=? WHERE upload_id=?").run(result.status, uploadId);
+      this.insertFacts(uploadId, result);
       this.database.exec("COMMIT");
     } catch (error) { this.database.exec("ROLLBACK"); throw error; }
   }
@@ -112,7 +134,9 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
   }
 
   saveReplayResult(uploadId: string, result: ParseResult): void {
-    this.database.prepare(`INSERT INTO parse_results
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      this.database.prepare(`INSERT INTO parse_results
       (upload_id,parser_version,status,total_lines,valid_lines,invalid_lines,unknown_type_lines,
        type_counts_json,first_timestamp,last_timestamp,diagnostics_json,parsed_at)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(upload_id,parser_version) DO NOTHING`).run(
@@ -120,6 +144,26 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
       result.invalidLines, result.unknownTypeLines, JSON.stringify(result.typeCounts),
       result.firstTimestamp, result.lastTimestamp, JSON.stringify(result.diagnostics), new Date().toISOString(),
     );
+      this.insertFacts(uploadId, result);
+      this.database.exec("COMMIT");
+    } catch (error) { this.database.exec("ROLLBACK"); throw error; }
+  }
+
+  private insertFacts(uploadId: string, result: ParseResult): void {
+    const message = this.database.prepare(`INSERT INTO message_facts(upload_id,parser_version,record_index,timestamp,role,model)
+      VALUES(?,?,?,?,?,?) ON CONFLICT DO NOTHING`);
+    for (const fact of result.messageFacts) message.run(uploadId, result.parserVersion, fact.recordIndex, fact.timestamp, fact.role, fact.model);
+    const token = this.database.prepare(`INSERT INTO token_usage_facts(upload_id,parser_version,record_index,timestamp,model,input_tokens,output_tokens,
+      cache_read_input_tokens,cache_write_or_creation_input_tokens,reasoning_output_tokens,reported_total_tokens)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`);
+    for (const fact of result.tokenUsageFacts) token.run(uploadId, result.parserVersion, fact.recordIndex, fact.timestamp, fact.model,
+      fact.inputTokens, fact.outputTokens, fact.cacheReadInputTokens, fact.cacheWriteOrCreationInputTokens, fact.reasoningOutputTokens, fact.reportedTotalTokens);
+    const call = this.database.prepare(`INSERT INTO tool_call_facts(upload_id,parser_version,record_index,item_index,timestamp,call_id,tool_name)
+      VALUES(?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`);
+    for (const fact of result.toolCallFacts) call.run(uploadId, result.parserVersion, fact.recordIndex, fact.itemIndex, fact.timestamp, fact.callId, fact.toolName);
+    const toolResult = this.database.prepare(`INSERT INTO tool_result_facts(upload_id,parser_version,record_index,item_index,timestamp,call_id,status,failure_code)
+      VALUES(?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`);
+    for (const fact of result.toolResultFacts) toolResult.run(uploadId, result.parserVersion, fact.recordIndex, fact.itemIndex, fact.timestamp, fact.callId, fact.status, fact.failureCode);
   }
 
   startReplay(runId: string, targetVersion: string, totalChunks: number): Record<string, unknown> {
@@ -217,6 +261,53 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
     return this.database.prepare(`SELECT job_id AS jobId,target_version AS targetVersion,status,total_chunks AS totalChunks,
       completed_chunks AS completedChunks,failed_chunks AS failedChunks,failure_code AS failureCode,
       started_at AS startedAt,finished_at AS finishedAt FROM replay_jobs WHERE cospec_run_id=? ORDER BY started_at DESC`).all(runId) as Array<Record<string, unknown>>;
+  }
+
+  getRunFacts(runId: string): Record<string, unknown> | null {
+    const version = this.activeParserVersion(runId);
+    if (!version || !this.getRun(runId)) return null;
+    const params = [runId, version];
+    const messageRows = this.database.prepare(`SELECT m.role,COUNT(*) AS count FROM message_facts m JOIN chunks c ON c.upload_id=m.upload_id
+      WHERE c.cospec_run_id=? AND m.parser_version=? GROUP BY m.role`).all(...params);
+    const token = this.database.prepare(`SELECT COUNT(*) AS observations,
+      COUNT(input_tokens) AS input_samples,SUM(input_tokens) AS input_tokens,
+      COUNT(output_tokens) AS output_samples,SUM(output_tokens) AS output_tokens,
+      COUNT(cache_read_input_tokens) AS cache_read_samples,SUM(cache_read_input_tokens) AS cache_read_input_tokens,
+      COUNT(cache_write_or_creation_input_tokens) AS cache_write_samples,SUM(cache_write_or_creation_input_tokens) AS cache_write_or_creation_input_tokens,
+      COUNT(reasoning_output_tokens) AS reasoning_samples,SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+      COUNT(reported_total_tokens) AS reported_total_samples,SUM(reported_total_tokens) AS reported_total_tokens
+      FROM token_usage_facts t JOIN chunks c ON c.upload_id=t.upload_id WHERE c.cospec_run_id=? AND t.parser_version=?`).get(...params) as Record<string, unknown>;
+    const tools = this.database.prepare(`SELECT
+      (SELECT COUNT(*) FROM tool_call_facts f JOIN chunks c ON c.upload_id=f.upload_id WHERE c.cospec_run_id=? AND f.parser_version=?) AS calls,
+      (SELECT COUNT(*) FROM tool_result_facts f JOIN chunks c ON c.upload_id=f.upload_id WHERE c.cospec_run_id=? AND f.parser_version=? AND f.status='success') AS successes,
+      (SELECT COUNT(*) FROM tool_result_facts f JOIN chunks c ON c.upload_id=f.upload_id WHERE c.cospec_run_id=? AND f.parser_version=? AND f.status='failure') AS failures,
+      (SELECT COUNT(*) FROM tool_result_facts f JOIN chunks c ON c.upload_id=f.upload_id WHERE c.cospec_run_id=? AND f.parser_version=? AND f.status='unknown') AS unknown_results`).get(runId, version, runId, version, runId, version, runId, version) as Record<string, unknown>;
+    const toolRows = this.database.prepare(`WITH calls AS (
+        SELECT f.call_id,f.tool_name FROM tool_call_facts f JOIN chunks c ON c.upload_id=f.upload_id WHERE c.cospec_run_id=? AND f.parser_version=?
+      ), results AS (
+        SELECT f.call_id,f.status FROM tool_result_facts f JOIN chunks c ON c.upload_id=f.upload_id WHERE c.cospec_run_id=? AND f.parser_version=?
+      ) SELECT calls.tool_name,COUNT(*) AS calls,
+        SUM(CASE WHEN results.status='success' THEN 1 ELSE 0 END) AS successes,
+        SUM(CASE WHEN results.status='failure' THEN 1 ELSE 0 END) AS failures,
+        SUM(CASE WHEN results.status IS NULL OR results.status='unknown' THEN 1 ELSE 0 END) AS unknown_results
+      FROM calls LEFT JOIN results ON results.call_id=calls.call_id GROUP BY calls.tool_name ORDER BY calls.tool_name`).all(runId, version, runId, version);
+    const modelRows = this.database.prepare(`SELECT model,COUNT(*) AS observations FROM token_usage_facts t JOIN chunks c ON c.upload_id=t.upload_id
+      WHERE c.cospec_run_id=? AND t.parser_version=? AND model IS NOT NULL GROUP BY model ORDER BY model`).all(runId, version);
+    const time = this.database.prepare(`SELECT MIN(timestamp) AS first_event_at,MAX(timestamp) AS last_event_at FROM (
+      SELECT m.timestamp FROM message_facts m JOIN chunks c ON c.upload_id=m.upload_id WHERE c.cospec_run_id=? AND m.parser_version=?
+      UNION ALL SELECT f.timestamp FROM tool_call_facts f JOIN chunks c ON c.upload_id=f.upload_id WHERE c.cospec_run_id=? AND f.parser_version=?) WHERE timestamp IS NOT NULL`)
+      .get(runId, version, runId, version) as Record<string, unknown>;
+    return {
+      parserVersion: version,
+      messages: { total: messageRows.reduce((sum, row) => sum + Number(row.count), 0), byRole: Object.fromEntries(messageRows.map((row) => [String(row.role), Number(row.count)])) },
+      tokens: { ...numericObject(token), byModel: Object.fromEntries(modelRows.map((row) => [String(row.model), Number(row.observations)])) },
+      tools: { ...numericObject(tools), byTool: Object.fromEntries(toolRows.map((row) => {
+        const { tool_name: _toolName, ...counts } = row;
+        return [String(row.tool_name), numericObject(counts)];
+      })) },
+      interval: { firstEventAt: time.first_event_at ?? null, lastEventAt: time.last_event_at ?? null, semantics: "host_record_span" },
+      attribution: { run: "explicit_jsonl_offset_interval", skill: "unavailable" },
+    };
   }
 
   async orphanRawFiles(): Promise<string[]> {
@@ -318,6 +409,8 @@ function runSummarySql(): string {
   return `SELECT c.cospec_run_id,
     MIN(json_extract(c.metadata_json,'$.agent_session_id')) AS agent_session_id,
     MIN(json_extract(c.metadata_json,'$.source_type')) AS source_type,
+    MIN(json_extract(c.metadata_json,'$.source_version')) AS source_version,
+    MIN(json_extract(c.metadata_json,'$.environment.agent_type')) AS agent_type,
     COUNT(*) AS chunk_count,SUM(c.end_offset-c.start_offset) AS byte_count,
     MIN(c.start_offset) AS start_offset,MAX(c.end_offset) AS end_offset,
     MIN(c.received_at) AS first_received_at,MAX(c.received_at) AS last_received_at,
@@ -329,10 +422,15 @@ function runSummarySql(): string {
 function toRunListItem(row: Record<string, unknown>): RunListItem {
   return {
     runId: String(row.cospec_run_id), agentSessionId: String(row.agent_session_id), sourceType: String(row.source_type),
+    sourceVersion: String(row.source_version), agentType: String(row.agent_type),
     chunkCount: Number(row.chunk_count), byteCount: Number(row.byte_count), startOffset: Number(row.start_offset), endOffset: Number(row.end_offset),
     activeParserVersion: row.active_parser_version === null ? null : String(row.active_parser_version),
     firstReceivedAt: String(row.first_received_at), lastReceivedAt: String(row.last_received_at),
   };
+}
+
+function numericObject(row: Record<string, unknown>): Record<string, number | null> {
+  return Object.fromEntries(Object.entries(row).map(([key, value]) => [key, value === null ? null : Number(value)]));
 }
 
 async function exists(path: string): Promise<boolean> {

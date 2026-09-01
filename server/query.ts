@@ -1,5 +1,5 @@
 export interface RunListItem {
-  runId: string; agentSessionId: string; sourceType: string;
+  runId: string; agentSessionId: string; sourceType: string; sourceVersion: string; agentType: string;
   chunkCount: number; byteCount: number; startOffset: number; endOffset: number;
   activeParserVersion: string | null; firstReceivedAt: string; lastReceivedAt: string;
 }
@@ -16,4 +16,5 @@ export interface QueryRepository {
   getRun(runId: string): RunDetail | null;
   getRunChunks(runId: string): Promise<Array<Record<string, unknown>>>;
   getRunReplays(runId: string): Array<Record<string, unknown>>;
+  getRunFacts(runId: string): Record<string, unknown> | null;
 }

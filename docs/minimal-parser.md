@@ -1,5 +1,7 @@
 # Codex JSONL 最小解析器（POC-05）
 
+> POC-05 的最小统计版本为 0.1.0；当前安装版本已升级为 0.2.0，同时支持 Codex、Claude Code 和版本化宿主资源事实。新增事实见 [宿主资源与工具事实 0.2](host-resource-facts-v0.2.md)。历史 0.1.0 结果继续保留。
+
 ## 处理流程
 
 服务端进程每秒检查一次 SQLite `pending` 队列：

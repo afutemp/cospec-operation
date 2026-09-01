@@ -47,6 +47,7 @@ Cospec 原始遥测数据端到端链路 PoC。
 - [Collector 状态与本地滚动日志](docs/collector-observability.md)
 - [Claude Code JSONL 数据源](docs/claude-code-source.md)
 - [双数据源并行验收](docs/multi-source-acceptance.md)
+- [宿主资源与工具事实 0.2](docs/host-resource-facts-v0.2.md)
 - [HTTP 上传与接收](docs/http-ingest.md)
 - [服务端持久存储](docs/durable-storage.md)
 - [Codex JSONL 最小解析器](docs/minimal-parser.md)

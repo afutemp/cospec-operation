@@ -104,6 +104,13 @@ export async function createIngestApp(options: IngestOptions): Promise<FastifyIn
       if (!queryRepository.getRun(runId)) return reply.code(404).send({ error: "run_not_found" });
       return reply.send({ items: queryRepository.getRunReplays(runId) });
     });
+
+    app.get("/api/v1/runs/:runId/facts", async (request, reply) => {
+      if (!authorized(request.headers.authorization, options.bearerToken)) return reply.code(401).send({ error: "unauthorized" });
+      const { runId } = request.params as { runId: string };
+      const result = queryRepository.getRunFacts(runId);
+      return result ? reply.send(result) : reply.code(404).send({ error: "run_not_found" });
+    });
   }
   return app;
 }

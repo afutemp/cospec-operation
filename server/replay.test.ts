@@ -21,26 +21,26 @@ test("Run replay switches atomically on completed_with_errors and keeps old vers
   await repository.accept(firstMetadata, first);
   await repository.accept(metadata(second, runId, firstMetadata.file.end_offset, firstMetadata.file.sha256, firstMetadata.file.source_file_id), second);
   await new ParserWorker(repository).runPending();
-  assert.equal(repository.activeParserVersion(runId), "0.1.0");
-
-  const successRegistry = new ParserRegistry({ "0.2.0": (bytes) => parseCodexJsonl(bytes, "0.2.0") });
-  const service = new ReplayService(repository, successRegistry);
-  const completed = await service.replayRun(runId, "0.2.0");
-  assert.equal(completed.status, "completed");
   assert.equal(repository.activeParserVersion(runId), "0.2.0");
-  assert.deepEqual(await service.replayRun(runId, "0.2.0"), completed);
+
+  const successRegistry = new ParserRegistry({ "0.3.0": (bytes) => parseCodexJsonl(bytes, "0.3.0") });
+  const service = new ReplayService(repository, successRegistry);
+  const completed = await service.replayRun(runId, "0.3.0");
+  assert.equal(completed.status, "completed");
+  assert.equal(repository.activeParserVersion(runId), "0.3.0");
+  assert.deepEqual(await service.replayRun(runId, "0.3.0"), completed);
 
   let attempts = 0;
-  const failureRegistry = new ParserRegistry({ "0.3.0": (bytes) => {
+  const failureRegistry = new ParserRegistry({ "0.4.0": (bytes) => {
     attempts += 1;
     if (attempts === 2) throw new Error("parser_failed");
-    return parseCodexJsonl(bytes, "0.3.0");
+    return parseCodexJsonl(bytes, "0.4.0");
   } });
-  const failed = await new ReplayService(repository, failureRegistry).replayRun(runId, "0.3.0");
+  const failed = await new ReplayService(repository, failureRegistry).replayRun(runId, "0.4.0");
   assert.equal(failed.status, "failed");
   assert.equal(failed.completed_chunks, 1);
-  assert.equal(repository.activeParserVersion(runId), "0.2.0");
-  assert.deepEqual(await new ReplayService(repository, failureRegistry).replayRun(runId, "0.3.0"), failed);
+  assert.equal(repository.activeParserVersion(runId), "0.3.0");
+  assert.deepEqual(await new ReplayService(repository, failureRegistry).replayRun(runId, "0.4.0"), failed);
   assert.equal(attempts, 2);
   await assert.rejects(new ReplayService(repository, new ParserRegistry()).replayRun(runId, "9.9.9"), /parser_version_not_installed/);
   repository.close();
