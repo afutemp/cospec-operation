@@ -4,7 +4,7 @@ import { useQueries } from "@tanstack/vue-query";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { telemetryQueries } from "../api";
-import { bytes, count, datetime, duration, percent, shortId } from "../format";
+import { bytes, copyText, count, datetime, duration, percent, shortId } from "../format";
 const route = useRoute(); const router = useRouter(); const runId = String(route.params.runId); const tab = ref("overview");
 const queries = useQueries({ queries: [
   { queryKey: ["run", runId], queryFn: () => telemetryQueries.getRun(runId) },
@@ -14,7 +14,7 @@ const queries = useQueries({ queries: [
 ] });
 const detail = computed(() => queries.value[0]?.data); const facts = computed(() => queries.value[1]?.data ?? {}); const chunks = computed(() => queries.value[2]?.data?.items ?? []); const replays = computed(() => queries.value[3]?.data?.items ?? []);
 const loading = computed(() => queries.value.some((query) => query.isLoading)); const failed = computed(() => queries.value[0]?.isError);
-async function copy() { await navigator.clipboard.writeText(runId); ElMessage.success("Run ID 已复制"); }
+async function copy() { await copyText(runId); ElMessage.success("Run ID 已复制"); }
 </script>
 <template><div><header class="page-head"><div><el-button text @click="router.push('/runs')">← 返回 Run 列表</el-button><h1>Run 详情</h1><p class="mono">{{ runId }} <el-button text size="small" @click="copy">复制</el-button></p></div></header>
   <el-alert v-if="failed" title="Run 不存在或无法读取" type="error" show-icon/><section v-else class="panel" v-loading="loading"><el-tabs v-model="tab">

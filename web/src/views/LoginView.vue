@@ -3,13 +3,13 @@ import { ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { auth } from "../auth";
-import { telemetryQueries } from "../api";
+import { ApiError, telemetryQueries } from "../api";
 const token = ref(""); const loading = ref(false); const route = useRoute(); const router = useRouter();
 async function login() {
   if (!token.value.trim()) return;
   loading.value = true; auth.set(token.value);
   try { await telemetryQueries.getRunUsage({}); await router.replace(typeof route.query.redirect === "string" ? route.query.redirect : "/"); }
-  catch { auth.clear(); ElMessage.error("Token 无效或服务端不可用"); }
+  catch (error) { auth.clear(); ElMessage.error(error instanceof ApiError && error.status === 401 ? "Token 无效，请重新输入" : "无法连接服务端，请稍后重试"); }
   finally { loading.value = false; }
 }
 </script>

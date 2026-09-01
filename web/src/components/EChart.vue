@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import * as echarts from "echarts/core";
-import { LineChart, PieChart } from "echarts/charts";
+import { BarChart, LineChart, PieChart } from "echarts/charts";
 import { GridComponent, LegendComponent, TooltipComponent } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import type { EChartsCoreOption } from "echarts/core";
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
-echarts.use([LineChart, PieChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
+echarts.use([BarChart, LineChart, PieChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
 const props = defineProps<{ option: EChartsCoreOption }>();
 const root = ref<HTMLElement>(); let chart: echarts.ECharts | undefined;
 const resize = () => chart?.resize();

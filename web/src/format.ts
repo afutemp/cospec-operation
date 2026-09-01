@@ -15,3 +15,8 @@ export function bytes(value: unknown): string {
 export function datetime(value: unknown): string { return typeof value === "string" ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "暂无数据"; }
 export function shortId(value: string): string { return value.length > 16 ? `${value.slice(0, 8)}…${value.slice(-6)}` : value; }
 export function errorText(error: unknown): string { return error instanceof Error ? error.message : "请求失败"; }
+export async function copyText(value: string): Promise<void> {
+  try { if (navigator.clipboard) { await navigator.clipboard.writeText(value); return; } } catch { /* use HTTP-compatible fallback */ }
+  const input = document.createElement("textarea"); input.value = value; input.style.position = "fixed"; input.style.opacity = "0";
+  document.body.appendChild(input); input.select(); document.execCommand("copy"); input.remove();
+}

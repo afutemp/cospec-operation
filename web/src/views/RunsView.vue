@@ -4,13 +4,13 @@ import { useQuery } from "@tanstack/vue-query";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { telemetryQueries, type RunItem } from "../api";
-import { bytes, datetime, errorText, shortId } from "../format";
+import { bytes, copyText, datetime, errorText, shortId } from "../format";
 const route = useRoute(); const router = useRouter(); const limit = 20;
 const page = ref(Math.max(1, Number(route.query.page) || 1));
 watch(page, (value) => void router.replace({ query: value === 1 ? {} : { page: String(value) } }));
 const offset = computed(() => (page.value - 1) * limit);
 const query = useQuery({ queryKey: computed(() => ["runs", offset.value]), queryFn: () => telemetryQueries.listRuns(limit, offset.value), placeholderData: (old) => old });
-async function copy(value: string) { await navigator.clipboard.writeText(value); ElMessage.success("Run ID 已复制"); }
+async function copy(value: string) { await copyText(value); ElMessage.success("Run ID 已复制"); }
 function open(row: RunItem) { void router.push(`/runs/${row.runId}`); }
 </script>
 <template><div><header class="page-head"><div><h1>Run 列表</h1><p>查看采集、解析和来源信息</p></div><el-button :loading="query.isFetching.value" @click="query.refetch()">刷新数据</el-button></header>
