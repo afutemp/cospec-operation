@@ -50,6 +50,7 @@ Cospec 原始遥测数据端到端链路 PoC。
 - [Run 级解析重放](docs/run-replay.md)
 - [只读查询 API](docs/query-api.md)
 - [Linux 真实端到端验收记录](docs/e2e-linux-2026-09-01.md)
+- [Linux HTTP 故障恢复验收记录](docs/e2e-http-outage-recovery-2026-09-01.md)
 - [集成前运行与冒烟检查](docs/integration-readiness.md)
 - [npm 安装与交付验收记录](docs/package-delivery-2026-09-01.md)
 - [验收场景](docs/acceptance.md)

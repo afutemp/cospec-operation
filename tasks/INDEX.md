@@ -14,5 +14,6 @@
 | POC-09 | [固化集成前可运行基线](POC-09-integration-readiness.md) | 已完成 |
 | POC-10 | [验证安装包与命令交付](POC-10-package-delivery.md) | 已完成 |
 | POC-11 | [补充 Collector 异常状态与滚动日志](POC-11-collector-observability.md) | 已完成 |
+| POC-12 | [验证服务端宕机后的自动续传](POC-12-outage-recovery-e2e.md) | 当前 Linux 环境通过 |
 
-`POC-01/01A` 已冻结，`POC-02/03/04/05/06/07/09/10/11` 已完成；`POC-08` 当前环境验收通过，Windows 实机项保持待验证。协议见 [upload-protocol-v0.1.md](../docs/upload-protocol-v0.1.md) 和 [collector-lifecycle-v0.1.md](../docs/collector-lifecycle-v0.1.md)，JSON Schema位于 `contracts/`。任务编号只在本 PoC 仓库内使用，不与历史 `REC/COL/SRV/UI` 任务混用。
+`POC-01/01A` 已冻结，`POC-02/03/04/05/06/07/09/10/11` 已完成；`POC-08/12` 当前 Linux 环境验收通过，Windows 实机项保持待验证。协议见 [upload-protocol-v0.1.md](../docs/upload-protocol-v0.1.md) 和 [collector-lifecycle-v0.1.md](../docs/collector-lifecycle-v0.1.md)，JSON Schema位于 `contracts/`。任务编号只在本 PoC 仓库内使用，不与历史 `REC/COL/SRV/UI` 任务混用。
