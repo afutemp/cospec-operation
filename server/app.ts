@@ -118,12 +118,12 @@ export async function createIngestApp(options: IngestOptions): Promise<FastifyIn
     app.get("/api/v1/summaries/run-usage", async (request, reply) => {
       if (!authorized(request.headers.authorization, options.bearerToken)) return reply.code(401).send({ error: "unauthorized" });
       const query = request.query as Record<string, string | undefined>;
-      const allowed = new Set(["from", "to", "agentType", "agentVersion", "model"]);
+      const allowed = new Set(["from", "to", "agentType", "agentVersion", "model", "cospecPluginVersion"]);
       if (Object.keys(query).some((key) => !allowed.has(key))) return reply.code(400).send({ error: "invalid_filter" });
       if ((query.from && !validDate(query.from)) || (query.to && !validDate(query.to)) ||
           (query.from && query.to && Date.parse(query.from) > Date.parse(query.to)) ||
           (query.agentType && !["codex", "claude_code"].includes(query.agentType)) ||
-          [query.agentVersion, query.model].some((value) => value !== undefined && (value.length === 0 || value.length > 200))) {
+          [query.agentVersion, query.model, query.cospecPluginVersion].some((value) => value !== undefined && (value.length === 0 || value.length > 200))) {
         return reply.code(400).send({ error: "invalid_filter" });
       }
       return reply.send(queryRepository.getRunUsageSummary(query as RunUsageFilters));

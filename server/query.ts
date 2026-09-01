@@ -12,7 +12,7 @@ export interface RunDetail extends RunListItem {
 }
 
 export interface RunUsageFilters {
-  from?: string; to?: string; agentType?: "codex" | "claude_code"; agentVersion?: string; model?: string;
+  from?: string; to?: string; agentType?: "codex" | "claude_code"; agentVersion?: string; model?: string; cospecPluginVersion?: string;
 }
 
 export interface QueryRepository {

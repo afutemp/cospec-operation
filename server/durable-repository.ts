@@ -396,6 +396,8 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
         THEN json_extract(c.metadata_json,'$.environment.agent_version') END),MIN(json_extract(c.metadata_json,'$.environment.agent_version'))) AS agent_version,
       COALESCE(MIN(CASE WHEN json_extract(c.metadata_json,'$.session.role')='main' OR json_extract(c.metadata_json,'$.session.role') IS NULL
         THEN json_extract(c.metadata_json,'$.environment.anonymous_terminal_id') END),MIN(json_extract(c.metadata_json,'$.environment.anonymous_terminal_id'))) AS anonymous_terminal_id,
+      COALESCE(MIN(CASE WHEN json_extract(c.metadata_json,'$.session.role')='main' OR json_extract(c.metadata_json,'$.session.role') IS NULL
+        THEN json_extract(c.metadata_json,'$.environment.cospec_plugin_version') END),MIN(json_extract(c.metadata_json,'$.environment.cospec_plugin_version'))) AS cospec_plugin_version,
       MIN(c.received_at) AS first_received_at,a.parser_version,
       MIN(CASE WHEN p.parser_version=a.parser_version THEN p.first_timestamp END) AS first_event_at,
       MAX(CASE WHEN p.parser_version=a.parser_version THEN p.last_timestamp END) AS last_event_at,
@@ -465,7 +467,8 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
       const time = Date.parse(String(row.first_event_at ?? row.first_received_at));
       return (!filters.from || time >= Date.parse(filters.from)) && (!filters.to || time <= Date.parse(filters.to)) &&
         (!filters.agentType || row.agent_type === filters.agentType) && (!filters.agentVersion || row.agent_version === filters.agentVersion) &&
-        (!filters.model || modelsByRun.get(runId)?.has(filters.model));
+        (!filters.model || modelsByRun.get(runId)?.has(filters.model)) &&
+        (!filters.cospecPluginVersion || row.cospec_plugin_version === filters.cospecPluginVersion);
     });
     const runIds = new Set(selected.map((row) => String(row.cospec_run_id)));
     const selectedMessages = messageRows.filter((row) => runIds.has(String(row.cospec_run_id)));
@@ -476,6 +479,9 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
     const byAgent: Record<string, number> = {};
     const byAgentVersion: Record<string, number> = {};
     const byDay: Record<string, number> = {};
+    const byCospecPluginVersion: Record<string, number> = {};
+    const pluginTerminals = new Map<string, Set<string>>();
+    const pluginRunsWithTerminal = new Map<string, number>();
     let runsWithParser = 0;
     const terminalIds = new Set<string>();
     let runsWithTerminalId = 0;
@@ -483,10 +489,16 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
       increment(byAgent, String(row.agent_type));
       increment(byAgentVersion, `${String(row.agent_type)}@${String(row.agent_version)}`);
       increment(byDay, new Date(Date.parse(String(row.first_event_at ?? row.first_received_at))).toISOString().slice(0, 10));
+      const pluginVersion = typeof row.cospec_plugin_version === "string" && row.cospec_plugin_version ? row.cospec_plugin_version : "<missing>";
+      increment(byCospecPluginVersion, pluginVersion);
       if (row.parser_version !== null) runsWithParser += 1;
       if (typeof row.anonymous_terminal_id === "string" && row.anonymous_terminal_id) {
         terminalIds.add(row.anonymous_terminal_id);
         runsWithTerminalId += 1;
+        const ids = pluginTerminals.get(pluginVersion) ?? new Set<string>();
+        ids.add(row.anonymous_terminal_id);
+        pluginTerminals.set(pluginVersion, ids);
+        pluginRunsWithTerminal.set(pluginVersion, (pluginRunsWithTerminal.get(pluginVersion) ?? 0) + 1);
       }
     }
     const messageByRole: Record<string, number> = {};
@@ -519,13 +531,18 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
       selectedToolCalls, selectedToolResults);
     return {
       filters: { from: filters.from ?? null, to: filters.to ?? null, agentType: filters.agentType ?? null,
-        agentVersion: filters.agentVersion ?? null, model: filters.model ?? null },
+        agentVersion: filters.agentVersion ?? null, model: filters.model ?? null, cospecPluginVersion: filters.cospecPluginVersion ?? null },
       timeSemantics: "first_jsonl_event_fallback_first_received",
       runs: { total: selected.length, with_parser_facts: runsWithParser, without_parser_facts: selected.length - runsWithParser,
-        byAgent, byAgentVersion, byDay },
+        byAgent, byAgentVersion, byCospecPluginVersion, byDay },
       terminals: { active_anonymous_terminals: terminalIds.size, runs_with_terminal_id: runsWithTerminalId,
         runs_missing_terminal_id: selected.length - runsWithTerminalId,
         run_coverage: selected.length === 0 ? null : runsWithTerminalId / selected.length },
+      cospecPluginVersions: { byVersion: Object.fromEntries(Object.entries(byCospecPluginVersion).map(([version, runs]) => {
+        const withTerminal = pluginRunsWithTerminal.get(version) ?? 0;
+        return [version, { runs, active_anonymous_terminals: pluginTerminals.get(version)?.size ?? 0,
+          runs_with_terminal_id: withTerminal, runs_missing_terminal_id: runs - withTerminal }];
+      })) },
       messages: coverageSummary(selected.length, messageRuns.size, { total: messageTotal, byRole: messageByRole,
         average_per_observed_run: messageRuns.size ? messageTotal / messageRuns.size : null }),
       tokens: coverageSummary(selected.length, tokenRuns.size, { ...tokenTotals,

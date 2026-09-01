@@ -128,6 +128,7 @@ test("run usage summary reports coverage and supports agent, version, model and 
     type: "token_count", info: { last_token_usage: { input_tokens: 20, output_tokens: 5 } } } })}\n`);
   const codex = metadata(codexBytes, codexRun, randomUUID(), 0, null);
   codex.environment.anonymous_terminal_id = terminalId;
+  codex.environment.cospec_plugin_version = "1.1.80";
   await repository.accept(codex, codexBytes);
 
   const missingRun = randomUUID();
@@ -145,6 +146,11 @@ test("run usage summary reports coverage and supports agent, version, model and 
     assert.deepEqual(summary.runs.byAgent, { claude_code: 1, codex: 2 });
     assert.deepEqual(summary.terminals, { active_anonymous_terminals: 1, runs_with_terminal_id: 2,
       runs_missing_terminal_id: 1, run_coverage: 2 / 3 });
+    assert.deepEqual(summary.runs.byCospecPluginVersion, { "1": 2, "1.1.80": 1 });
+    assert.deepEqual(summary.cospecPluginVersions.byVersion["1.1.80"], { runs: 1, active_anonymous_terminals: 1,
+      runs_with_terminal_id: 1, runs_missing_terminal_id: 0 });
+    assert.deepEqual(summary.cospecPluginVersions.byVersion["1"], { runs: 2, active_anonymous_terminals: 1,
+      runs_with_terminal_id: 1, runs_missing_terminal_id: 1 });
     assert.equal(summary.messages.total, 3);
     assert.equal(summary.messages.runs_with_data, 1);
     assert.equal(summary.messages.runs_missing_data, 2);
@@ -176,9 +182,13 @@ test("run usage summary reports coverage and supports agent, version, model and 
     assert.equal(filtered.statusCode, 200);
     assert.equal(filtered.json().runs.total, 1);
     assert.equal(filtered.json().terminals.active_anonymous_terminals, 1);
+    const pluginFiltered = await app.inject({ method: "GET", url: "/api/v1/summaries/run-usage?cospecPluginVersion=1.1.80", headers });
+    assert.equal(pluginFiltered.statusCode, 200);
+    assert.equal(pluginFiltered.json().runs.total, 1);
     assert.deepEqual(filtered.json().runs.byAgent, { claude_code: 1 });
     assert.equal((await app.inject({ method: "GET", url: "/api/v1/summaries/run-usage?agentType=other", headers })).statusCode, 400);
     assert.equal((await app.inject({ method: "GET", url: "/api/v1/summaries/run-usage?unknown=x", headers })).statusCode, 400);
+    assert.equal((await app.inject({ method: "GET", url: `/api/v1/summaries/run-usage?cospecPluginVersion=${"x".repeat(201)}`, headers })).statusCode, 400);
     assert.equal((await app.inject({ method: "GET", url: "/api/v1/summaries/run-usage" })).statusCode, 401);
   } finally { await app.close(); repository.close(); }
 });
