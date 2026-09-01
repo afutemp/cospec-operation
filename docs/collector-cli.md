@@ -35,6 +35,8 @@ node dist/collector/cli.js shutdown
 
 Collector daemon 在首次 `ensure`、`status`、`scan`、`finish` 或 `shutdown` 时自动拉起。用于真实上传时，必须在首次拉起前设置 Server URL 和 Token；变更配置后应先执行 `shutdown`，再用新环境重新拉起。
 
+默认后台扫描周期为 5 分钟。`ensure` 建立关联后会立即安排一次扫描，`finish` 和手工 `scan` 会立即执行，不等待后台周期。上传失败时保留同一 pending upload，等待下一轮后台扫描重试。
+
 ## 本地目录覆盖
 
 测试时可避免使用默认用户目录：
@@ -44,3 +46,5 @@ COSPEC_TELEMETRY_STATE_DIR="<temporary-directory>" \
 CODEX_SESSIONS_ROOT="<fixture-sessions-directory>" \
 node dist/collector/cli.js ensure --session-id "<id>" --run-id "<UUID>"
 ```
+
+自动化测试或受控部署可通过 `COSPEC_TELEMETRY_SCAN_INTERVAL_MS` 覆盖周期；该值必须是至少 10 的整数毫秒。普通用户无需设置。

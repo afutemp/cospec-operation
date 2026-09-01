@@ -12,10 +12,13 @@
 | `COSPEC_TELEMETRY_HOST` | Server | `127.0.0.1` | 监听地址 |
 | `COSPEC_TELEMETRY_PORT` | Server | `4318` | 监听端口 |
 | `COSPEC_TELEMETRY_STATE_DIR` | Collector | 平台用户状态目录 | Collector JSON 状态与离线 outbox |
+| `COSPEC_TELEMETRY_SCAN_INTERVAL_MS` | Collector | `300000` | 后台扫描周期；主要用于自动化测试覆盖 |
 | `CODEX_SESSIONS_ROOT` | Collector | Codex 默认 sessions 目录 | 测试或非默认安装时覆盖 |
 | `CODEX_SESSION_ID` | Collector CLI | 可由 `--session-id` 代替 | 精确关联 JSONL 的 Agent Session ID |
 
 Server 缺少 token、端口非法时会在监听前失败。Collector 配置了 Server URL 却缺少 token 时，daemon 启动失败，CLI 返回非零退出码。daemon 会继承首次拉起它的环境；改变 URL 或 token 后先执行 `shutdown`。
+
+Collector 默认每 5 分钟后台扫描一次。`ensure` 后异步立即扫描，`finish` 和显式 `scan` 立即扫描；因此正常短 Run 通常由开始和结束动作完成采集，不依赖高频轮询。
 
 ## 手工冒烟流程
 

@@ -21,7 +21,7 @@ test("daemon persists failure, logs retries and recovery, and retains diagnostic
   await writeFile(sessionPath, `${JSON.stringify({ type: "session_meta", payload: { id: sessionId } })}\n`);
   let failing = true;
   const receiver: ChunkReceiver = { async accept() { if (failing) throw new Error("upload_network_error"); } };
-  let server = await startDaemon({ endpoint, stateDirectory, sessionsRoot, receiver });
+  let server = await startDaemon({ endpoint, stateDirectory, sessionsRoot, receiver, scanIntervalMs: 100 });
   try {
     await request(endpoint, { type: "ensure", agentType: "codex", agentSessionId: sessionId, cospecRunId: runId });
     await appendFile(sessionPath, '{"type":"event_msg"}\n');
@@ -41,7 +41,7 @@ test("daemon persists failure, logs retries and recovery, and retains diagnostic
     assert.equal(content.includes(sessionPath), false);
 
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    server = await startDaemon({ endpoint, stateDirectory, sessionsRoot, receiver });
+    server = await startDaemon({ endpoint, stateDirectory, sessionsRoot, receiver, scanIntervalMs: 100 });
     const restarted = await request(endpoint, { type: "status" });
     assert.ok((restarted.data as CollectorState).diagnostics?.lastSuccessAt);
     assert.equal((restarted.data as CollectorState).diagnostics?.consecutiveFailures, 0);

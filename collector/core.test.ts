@@ -12,9 +12,14 @@ import { JsonStateStore, emptyState } from "./state.js";
 import { RunRegistry, runBindingContract } from "./runs.js";
 import { CollectorScanner, type ChunkReceiver } from "./scanner.js";
 import type { ChunkMetadata } from "./types.js";
+import { DEFAULT_SCAN_INTERVAL_MS } from "./daemon.js";
 
 const require = createRequire(import.meta.url);
 const addFormats = require("ajv-formats") as typeof import("ajv-formats").default;
+
+test("default background scan interval is five minutes", () => {
+  assert.equal(DEFAULT_SCAN_INTERVAL_MS, 300_000);
+});
 
 async function fixture(): Promise<{ root: string; path: string; sessionId: string }> {
   const root = await mkdtemp(join(tmpdir(), "cospec-collector-"));

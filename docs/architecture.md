@@ -38,6 +38,7 @@
 - 通过 Agent Session ID 精确定位 JSONL，不按修改时间猜测；
 - 只采集活动或待收尾 Cospec Run 的 `[start_offset, end_offset]` 区间；没有活动 Run 时不采集该 Session；
 - 只切取以换行结束的完整新增区间；
+- 默认每 5 分钟执行后台扫描；`ensure`、`finish` 和手工 `scan` 提供即时触发点；
 - 计算数据块 SHA-256 和字节数；
 - 生成上传信息与环境快照；
 - 不解析运营业务含义。
@@ -82,4 +83,4 @@
 - Collector 使用 Node.js 跨平台 API 共用实现；只有 IPC 地址和状态目录等确有差异的入口使用小型平台辅助函数，不引入独立适配层；
 - Web 技术栈到 POC-07 再决定。
 
-详见 [technology.md](technology.md) 和 [collector-lifecycle-v0.1.md](collector-lifecycle-v0.1.md)。正式服务管理、默认退避周期和生产部署方式仍不属于当前阶段。
+详见 [technology.md](technology.md) 和 [collector-lifecycle-v0.1.md](collector-lifecycle-v0.1.md)。正式服务管理、生产级自适应退避和部署方式仍不属于当前阶段。

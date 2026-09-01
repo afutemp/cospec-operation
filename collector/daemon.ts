@@ -8,9 +8,18 @@ import { HttpChunkReceiver } from "./http-receiver.js";
 import { CollectorEventLog } from "./event-log.js";
 import type { CollectorCommand, CollectorDiagnostics, CollectorState, CommandResponse } from "./types.js";
 
-export interface DaemonOptions { endpoint?: string; stateDirectory?: string; sessionsRoot?: string; receiver?: ChunkReceiver }
+export interface DaemonOptions {
+  endpoint?: string;
+  stateDirectory?: string;
+  sessionsRoot?: string;
+  receiver?: ChunkReceiver;
+  scanIntervalMs?: number;
+}
+
+export const DEFAULT_SCAN_INTERVAL_MS = 5 * 60 * 1_000;
 
 export async function startDaemon(options: DaemonOptions = {}): Promise<Server> {
+  const scanIntervalMs = options.scanIntervalMs ?? scanIntervalFromEnvironment();
   const store = new JsonStateStore(options.stateDirectory ?? getStateDirectory());
   const registry = new RunRegistry(options.sessionsRoot ?? getCodexSessionsRoot());
   const stateDirectory = options.stateDirectory ?? getStateDirectory();
@@ -71,6 +80,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Server> 
         const binding = await registry.ensure(state, command.agentType, command.agentSessionId, command.cospecRunId);
         await store.save(state);
         await eventLog.write({ level: "info", event: "run_ensured", cospec_run_id: binding.cospecRunId, ...(binding.sourceFileId ? { source_file_id: binding.sourceFileId } : {}) });
+        setImmediate(() => { void enqueue(scan).catch(() => undefined); });
         return { ok: true, data: binding };
       }
       if (command.type === "finish") {
@@ -88,7 +98,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Server> 
   };
   server = await listen(options.endpoint ?? getIpcEndpoint(), handle);
   await eventLog.write({ level: "info", event: "daemon_started" });
-  const scanTimer = setInterval(() => { void enqueue(scan).catch(() => undefined); }, 1_000);
+  const scanTimer = setInterval(() => { void enqueue(scan).catch(() => undefined); }, scanIntervalMs);
   server.once("close", () => clearInterval(scanTimer));
   const shutdown = () => { void eventLog.write({ level: "info", event: "daemon_stopping" }).finally(() => server.close()); };
   process.once("SIGTERM", shutdown);
@@ -132,5 +142,13 @@ function diagnosticContext(state: CollectorState): { cospecRunId?: string; sourc
 function requiredEnvironment(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`missing_environment:${name}`);
+  return value;
+}
+
+function scanIntervalFromEnvironment(): number {
+  const configured = process.env.COSPEC_TELEMETRY_SCAN_INTERVAL_MS;
+  if (configured === undefined) return DEFAULT_SCAN_INTERVAL_MS;
+  const value = Number(configured);
+  if (!Number.isInteger(value) || value < 10) throw new Error("invalid_environment:COSPEC_TELEMETRY_SCAN_INTERVAL_MS");
   return value;
 }

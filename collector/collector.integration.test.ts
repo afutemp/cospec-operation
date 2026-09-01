@@ -25,6 +25,7 @@ test("CLI, daemon and local mock receiver support complete-line incremental resu
     CODEX_SESSIONS_ROOT: sessionsRoot,
     COSPEC_TELEMETRY_STATE_DIR: stateDirectory,
     COSPEC_TELEMETRY_NAMESPACE: namespace,
+    COSPEC_TELEMETRY_SCAN_INTERVAL_MS: "50",
   };
 
   try {
