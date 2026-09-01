@@ -1,7 +1,7 @@
-export const PARSER_VERSION = "0.2.0";
+export const PARSER_VERSION = "0.3.0";
 
 const CODEX_KNOWN_TYPES = new Set(["session_meta", "event_msg", "response_item", "turn_context", "compacted"]);
-const CLAUDE_CODE_KNOWN_TYPES = new Set(["queue-operation", "user", "assistant", "attachment", "last-prompt", "mode"]);
+const CLAUDE_CODE_KNOWN_TYPES = new Set(["queue-operation", "user", "assistant", "attachment", "last-prompt", "mode", "system"]);
 
 export interface ParseDiagnostic { line: number; byteOffset: number; code: "invalid_json" }
 export interface MessageFact { recordIndex: number; timestamp: string | null; role: string; model: string | null }
@@ -15,6 +15,11 @@ export interface ToolResultFact {
   recordIndex: number; itemIndex: number; timestamp: string | null; callId: string;
   status: "success" | "failure" | "unknown"; failureCode: "nonzero_exit_code" | "explicit_is_error" | null;
 }
+export interface CompactionFact {
+  recordIndex: number; timestamp: string | null; trigger: "auto" | "manual" | "unknown";
+  preTokens: number | null; postTokens: number | null;
+}
+export interface ContextWindowFact { recordIndex: number; timestamp: string | null; contextWindowTokens: number }
 export interface ParseResult {
   parserVersion: string;
   status: "completed" | "completed_with_errors";
@@ -30,6 +35,8 @@ export interface ParseResult {
   tokenUsageFacts: TokenUsageFact[];
   toolCallFacts: ToolCallFact[];
   toolResultFacts: ToolResultFact[];
+  compactionFacts: CompactionFact[];
+  contextWindowFacts: ContextWindowFact[];
 }
 
 export function parseCodexJsonl(bytes: Buffer, parserVersion = PARSER_VERSION): ParseResult {
@@ -57,6 +64,8 @@ function parseJsonl(bytes: Buffer, knownTypes: ReadonlySet<string>, parserVersio
   const tokenUsageFacts: TokenUsageFact[] = [];
   const toolCallFacts: ToolCallFact[] = [];
   const toolResultFacts: ToolResultFact[] = [];
+  const compactionFacts: CompactionFact[] = [];
+  const contextWindowFacts: ContextWindowFact[] = [];
   for (let index = 0; index < bytes.length; index += 1) {
     if (bytes[index] !== 0x0a) continue;
     totalLines += 1;
@@ -68,8 +77,8 @@ function parseJsonl(bytes: Buffer, knownTypes: ReadonlySet<string>, parserVersio
       typeCounts[type] = (typeCounts[type] ?? 0) + 1;
       if (!knownTypes.has(type)) unknownTypeLines += 1;
       if (typeof value.timestamp === "string" && Number.isFinite(Date.parse(value.timestamp))) timestamps.push(value.timestamp);
-      if (knownTypes === CODEX_KNOWN_TYPES) extractCodexFacts(value, totalLines, messageFacts, tokenUsageFacts, toolCallFacts, toolResultFacts);
-      else extractClaudeCodeFacts(value, totalLines, messageFacts, tokenUsageFacts, toolCallFacts, toolResultFacts);
+      if (knownTypes === CODEX_KNOWN_TYPES) extractCodexFacts(value, totalLines, messageFacts, tokenUsageFacts, toolCallFacts, toolResultFacts, compactionFacts, contextWindowFacts);
+      else extractClaudeCodeFacts(value, totalLines, messageFacts, tokenUsageFacts, toolCallFacts, toolResultFacts, compactionFacts);
     } catch {
       invalidLines += 1;
       diagnostics.push({ line: totalLines, byteOffset: lineStart, code: "invalid_json" });
@@ -83,14 +92,17 @@ function parseJsonl(bytes: Buffer, knownTypes: ReadonlySet<string>, parserVersio
     totalLines, validLines, invalidLines, unknownTypeLines, typeCounts,
     firstTimestamp: timestamps[0] ?? null,
     lastTimestamp: timestamps.at(-1) ?? null,
-    diagnostics, messageFacts, tokenUsageFacts, toolCallFacts, toolResultFacts,
+    diagnostics, messageFacts, tokenUsageFacts, toolCallFacts, toolResultFacts, compactionFacts, contextWindowFacts,
   };
 }
 
-function extractCodexFacts(value: Record<string, unknown>, recordIndex: number, messages: MessageFact[], tokens: TokenUsageFact[], calls: ToolCallFact[], results: ToolResultFact[]): void {
+function extractCodexFacts(value: Record<string, unknown>, recordIndex: number, messages: MessageFact[], tokens: TokenUsageFact[], calls: ToolCallFact[], results: ToolResultFact[], compactions: CompactionFact[], contextWindows: ContextWindowFact[]): void {
   const timestamp = validTimestamp(value.timestamp);
   const payload = object(value.payload);
   if (!payload) return;
+  if (value.type === "compacted") compactions.push({ recordIndex, timestamp, trigger: "unknown", preTokens: null, postTokens: null });
+  const contextWindowTokens = integer(payload.model_context_window) ?? integer(object(payload.info)?.model_context_window);
+  if (contextWindowTokens !== null) contextWindows.push({ recordIndex, timestamp, contextWindowTokens });
   if (value.type === "response_item" && payload.type === "message" && typeof payload.role === "string") {
     messages.push({ recordIndex, timestamp, role: payload.role, model: null });
   }
@@ -110,8 +122,14 @@ function extractCodexFacts(value: Record<string, unknown>, recordIndex: number, 
   }
 }
 
-function extractClaudeCodeFacts(value: Record<string, unknown>, recordIndex: number, messages: MessageFact[], tokens: TokenUsageFact[], calls: ToolCallFact[], results: ToolResultFact[]): void {
+function extractClaudeCodeFacts(value: Record<string, unknown>, recordIndex: number, messages: MessageFact[], tokens: TokenUsageFact[], calls: ToolCallFact[], results: ToolResultFact[], compactions: CompactionFact[]): void {
   const timestamp = validTimestamp(value.timestamp);
+  if (value.type === "system" && value.subtype === "compact_boundary") {
+    const metadata = object(value.compactMetadata);
+    const rawTrigger = metadata?.trigger;
+    const trigger = rawTrigger === "auto" || rawTrigger === "manual" ? rawTrigger : "unknown";
+    compactions.push({ recordIndex, timestamp, trigger, preTokens: integer(metadata?.preTokens), postTokens: integer(metadata?.postTokens) });
+  }
   const message = object(value.message);
   if (!message) return;
   const role = typeof message.role === "string" ? message.role : typeof value.type === "string" ? value.type : null;

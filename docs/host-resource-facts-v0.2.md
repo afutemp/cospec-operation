@@ -41,6 +41,8 @@ Authorization: Bearer <token>
 
 返回活动解析器版本下的消息角色分布、Token 分类及有效样本、模型 observation、工具结果及按工具分布，以及首末消息/工具时间。时间跨度固定标记为 `host_record_span`，Skill 归属固定为 `unavailable`。
 
+解析器 0.3.0 另返回 `context`：Codex 和 Claude Code 的压缩次数，Claude Code 可明确区分的自动/手动压缩，以及 JSONL 明确提供的上下文上限。Claude Code 会话 JSONL 不提供上限，因此当前保持不可得；不依据模型名称推断。详细口径见 [POC-23](../tasks/POC-23-context-compaction.md)。
+
 查询同时返回：
 
 - `determined_results = successes + failures`；

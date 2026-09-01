@@ -65,6 +65,16 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
         timestamp TEXT, call_id TEXT NOT NULL, status TEXT NOT NULL, failure_code TEXT,
         PRIMARY KEY(upload_id,parser_version,record_index,item_index), FOREIGN KEY(upload_id) REFERENCES chunks(upload_id)
       );
+      CREATE TABLE IF NOT EXISTS compaction_facts (
+        upload_id TEXT NOT NULL, parser_version TEXT NOT NULL, record_index INTEGER NOT NULL,
+        timestamp TEXT, trigger TEXT NOT NULL, pre_tokens INTEGER, post_tokens INTEGER,
+        PRIMARY KEY(upload_id,parser_version,record_index), FOREIGN KEY(upload_id) REFERENCES chunks(upload_id)
+      );
+      CREATE TABLE IF NOT EXISTS context_window_facts (
+        upload_id TEXT NOT NULL, parser_version TEXT NOT NULL, record_index INTEGER NOT NULL,
+        timestamp TEXT, context_window_tokens INTEGER NOT NULL,
+        PRIMARY KEY(upload_id,parser_version,record_index), FOREIGN KEY(upload_id) REFERENCES chunks(upload_id)
+      );
       CREATE TABLE IF NOT EXISTS replay_jobs (
         job_id TEXT PRIMARY KEY, cospec_run_id TEXT NOT NULL, target_version TEXT NOT NULL,
         status TEXT NOT NULL, total_chunks INTEGER NOT NULL, completed_chunks INTEGER NOT NULL DEFAULT 0,
@@ -164,6 +174,12 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
     const toolResult = this.database.prepare(`INSERT INTO tool_result_facts(upload_id,parser_version,record_index,item_index,timestamp,call_id,status,failure_code)
       VALUES(?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`);
     for (const fact of result.toolResultFacts) toolResult.run(uploadId, result.parserVersion, fact.recordIndex, fact.itemIndex, fact.timestamp, fact.callId, fact.status, fact.failureCode);
+    const compaction = this.database.prepare(`INSERT INTO compaction_facts(upload_id,parser_version,record_index,timestamp,trigger,pre_tokens,post_tokens)
+      VALUES(?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`);
+    for (const fact of result.compactionFacts) compaction.run(uploadId, result.parserVersion, fact.recordIndex, fact.timestamp, fact.trigger, fact.preTokens, fact.postTokens);
+    const contextWindow = this.database.prepare(`INSERT INTO context_window_facts(upload_id,parser_version,record_index,timestamp,context_window_tokens)
+      VALUES(?,?,?,?,?) ON CONFLICT DO NOTHING`);
+    for (const fact of result.contextWindowFacts) contextWindow.run(uploadId, result.parserVersion, fact.recordIndex, fact.timestamp, fact.contextWindowTokens);
   }
 
   startReplay(runId: string, targetVersion: string, totalChunks: number): Record<string, unknown> {
@@ -303,6 +319,13 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
       SELECT m.timestamp FROM message_facts m JOIN chunks c ON c.upload_id=m.upload_id WHERE c.cospec_run_id=? AND m.parser_version=?
       UNION ALL SELECT f.timestamp FROM tool_call_facts f JOIN chunks c ON c.upload_id=f.upload_id WHERE c.cospec_run_id=? AND f.parser_version=?) WHERE timestamp IS NOT NULL`)
       .get(runId, version, runId, version) as Record<string, unknown>;
+    const compactionRows = this.database.prepare(`SELECT f.trigger,f.pre_tokens,f.post_tokens FROM compaction_facts f
+      JOIN chunks c ON c.upload_id=f.upload_id WHERE c.cospec_run_id=? AND f.parser_version=?
+      ORDER BY c.start_offset,f.record_index`).all(runId, version) as Array<Record<string, unknown>>;
+    const contextWindowRows = this.database.prepare(`SELECT f.context_window_tokens FROM context_window_facts f
+      JOIN chunks c ON c.upload_id=f.upload_id WHERE c.cospec_run_id=? AND f.parser_version=?
+      ORDER BY c.start_offset,f.record_index`).all(runId, version) as Array<Record<string, unknown>>;
+    const contextWindowValues = [...new Set(contextWindowRows.map((row) => Number(row.context_window_tokens)))];
     return {
       parserVersion: version,
       messages: { total: messageRows.reduce((sum, row) => sum + Number(row.count), 0), byRole: Object.fromEntries(messageRows.map((row) => [String(row.role), Number(row.count)])) },
@@ -315,6 +338,23 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
       interval: { firstEventAt: time.first_event_at ?? null, lastEventAt: time.last_event_at ?? null, semantics: "host_record_span" },
       attribution: { run: "explicit_jsonl_offset_interval", skill: "unavailable" },
       subagents: this.getRunSubagentFacts(runId, version),
+      context: {
+        compactions: {
+          total: compactionRows.length,
+          byTrigger: {
+            auto: compactionRows.filter((row) => row.trigger === "auto").length,
+            manual: compactionRows.filter((row) => row.trigger === "manual").length,
+            unknown: compactionRows.filter((row) => row.trigger === "unknown").length,
+          },
+          withTokenDelta: compactionRows.filter((row) => row.pre_tokens !== null && row.post_tokens !== null).length,
+        },
+        window: {
+          observed: contextWindowRows.length > 0,
+          latestTokens: contextWindowRows.length ? Number(contextWindowRows.at(-1)!.context_window_tokens) : null,
+          observedValues: contextWindowValues,
+          source: contextWindowRows.length ? "jsonl_explicit_field" : "unavailable",
+        },
+      },
     };
   }
 

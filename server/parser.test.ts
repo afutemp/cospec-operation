@@ -66,6 +66,43 @@ test("Codex facts retain resource metadata and only direct tool failure evidence
   assert.equal(JSON.stringify(result).includes("private"), false);
 });
 
+test("parsers extract compactions and only explicit context window limits", () => {
+  const codex = parseCodexJsonl(Buffer.from([
+    JSON.stringify({ type: "event_msg", timestamp: "2026-09-01T01:00:00Z", payload: { type: "token_count", info: {
+      model_context_window: 258400, last_token_usage: { input_tokens: 10 } } } }),
+    JSON.stringify({ type: "compacted", timestamp: "2026-09-01T01:00:01Z", payload: { message: "private" } }),
+  ].join("\n") + "\n"));
+  assert.deepEqual(codex.contextWindowFacts, [{ recordIndex: 1, timestamp: "2026-09-01T01:00:00Z", contextWindowTokens: 258400 }]);
+  assert.deepEqual(codex.compactionFacts, [{ recordIndex: 2, timestamp: "2026-09-01T01:00:01Z", trigger: "unknown", preTokens: null, postTokens: null }]);
+
+  const claude = parseClaudeCodeJsonl(Buffer.from([
+    JSON.stringify({ type: "system", subtype: "compact_boundary", timestamp: "2026-09-01T02:00:00Z", compactMetadata: { trigger: "auto", preTokens: 229490, postTokens: 9493 } }),
+    JSON.stringify({ type: "system", subtype: "compact_boundary", timestamp: "2026-09-01T03:00:00Z", compactMetadata: { trigger: "manual", preTokens: 575478, postTokens: 9301 } }),
+    JSON.stringify({ type: "user", isCompactSummary: true, message: { role: "user", content: "private duplicate marker" } }),
+  ].join("\n") + "\n"));
+  assert.deepEqual(claude.compactionFacts, [
+    { recordIndex: 1, timestamp: "2026-09-01T02:00:00Z", trigger: "auto", preTokens: 229490, postTokens: 9493 },
+    { recordIndex: 2, timestamp: "2026-09-01T03:00:00Z", trigger: "manual", preTokens: 575478, postTokens: 9301 },
+  ]);
+  assert.deepEqual(claude.contextWindowFacts, []);
+});
+
+test("Run facts expose compaction counts and context limit availability", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cospec-context-facts-"));
+  const bytes = Buffer.from([
+    JSON.stringify({ type: "event_msg", payload: { type: "token_count", info: { model_context_window: 258400 } } }),
+    JSON.stringify({ type: "compacted", payload: {} }),
+  ].join("\n") + "\n");
+  const value = metadata(bytes);
+  const repository = await DurableChunkRepository.open(root);
+  await repository.accept(value, bytes);
+  await new ParserWorker(repository).runPending();
+  const context = (repository.getRunFacts(value.cospec_run_id) as { context: Record<string, any> }).context;
+  assert.deepEqual(context.compactions, { total: 1, byTrigger: { auto: 0, manual: 0, unknown: 1 }, withTokenDelta: 0 });
+  assert.deepEqual(context.window, { observed: true, latestTokens: 258400, observedValues: [258400], source: "jsonl_explicit_field" });
+  repository.close();
+});
+
 test("worker persists versioned result and remains idempotent across restart", async () => {
   const root = await mkdtemp(join(tmpdir(), "cospec-parser-worker-"));
   const bytes = Buffer.from('{"type":"event_msg","timestamp":"2026-09-01T00:00:00Z"}\n{"bad":\n');
