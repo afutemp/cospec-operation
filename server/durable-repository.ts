@@ -356,7 +356,8 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
         THEN json_extract(c.metadata_json,'$.environment.agent_version') END),MIN(json_extract(c.metadata_json,'$.environment.agent_version'))) AS agent_version,
       MIN(c.received_at) AS first_received_at,a.parser_version,
       MIN(CASE WHEN p.parser_version=a.parser_version THEN p.first_timestamp END) AS first_event_at,
-      MAX(CASE WHEN p.parser_version=a.parser_version THEN p.last_timestamp END) AS last_event_at
+      MAX(CASE WHEN p.parser_version=a.parser_version THEN p.last_timestamp END) AS last_event_at,
+      MAX(CASE WHEN json_extract(c.metadata_json,'$.session.role')='main' THEN 1 ELSE 0 END) AS subagent_collection
       FROM chunks c LEFT JOIN active_parser_versions a ON a.cospec_run_id=c.cospec_run_id
       LEFT JOIN parse_results p ON p.upload_id=c.upload_id
       GROUP BY c.cospec_run_id`).all() as Array<Record<string, unknown>>;
@@ -374,14 +375,43 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
       FROM token_usage_facts t JOIN chunks c ON c.upload_id=t.upload_id
       JOIN active_parser_versions a ON a.cospec_run_id=c.cospec_run_id AND a.parser_version=t.parser_version
       GROUP BY c.cospec_run_id,t.parser_version,t.model`).all() as Array<Record<string, unknown>>;
-    const toolCallRows = this.database.prepare(`SELECT c.cospec_run_id,f.call_id,f.tool_name,f.timestamp
+    const toolCallRows = this.database.prepare(`SELECT c.cospec_run_id,f.call_id,f.tool_name,f.timestamp,
+      json_extract(c.metadata_json,'$.session.role') AS session_role,
+      json_extract(c.metadata_json,'$.agent_session_id') AS agent_session_id
       FROM tool_call_facts f JOIN chunks c ON c.upload_id=f.upload_id
       JOIN active_parser_versions a ON a.cospec_run_id=c.cospec_run_id AND a.parser_version=f.parser_version
       ORDER BY c.cospec_run_id,f.record_index,f.item_index`).all() as Array<Record<string, unknown>>;
-    const toolResultRows = this.database.prepare(`SELECT c.cospec_run_id,f.call_id,f.timestamp
+    const toolResultRows = this.database.prepare(`SELECT c.cospec_run_id,f.call_id,f.timestamp,
+      json_extract(c.metadata_json,'$.session.role') AS session_role,
+      json_extract(c.metadata_json,'$.agent_session_id') AS agent_session_id
       FROM tool_result_facts f JOIN chunks c ON c.upload_id=f.upload_id
       JOIN active_parser_versions a ON a.cospec_run_id=c.cospec_run_id AND a.parser_version=f.parser_version
       ORDER BY c.cospec_run_id,f.record_index,f.item_index`).all() as Array<Record<string, unknown>>;
+    const subagentSessionRows = this.database.prepare(`SELECT c.cospec_run_id,
+      json_extract(c.metadata_json,'$.agent_session_id') AS agent_session_id,
+      json_extract(c.metadata_json,'$.session.parent_agent_session_id') AS parent_agent_session_id,
+      MIN(CASE WHEN p.parser_version=a.parser_version THEN p.first_timestamp END) AS first_event_at,
+      MAX(CASE WHEN p.parser_version=a.parser_version THEN p.last_timestamp END) AS last_event_at
+      FROM chunks c JOIN active_parser_versions a ON a.cospec_run_id=c.cospec_run_id
+      LEFT JOIN parse_results p ON p.upload_id=c.upload_id
+      WHERE json_extract(c.metadata_json,'$.session.role')='subagent'
+      GROUP BY c.cospec_run_id,agent_session_id,parent_agent_session_id`).all() as Array<Record<string, unknown>>;
+    const subagentMessageRows = this.database.prepare(`SELECT c.cospec_run_id,
+      json_extract(c.metadata_json,'$.agent_session_id') AS agent_session_id,COUNT(*) AS count
+      FROM message_facts m JOIN chunks c ON c.upload_id=m.upload_id
+      JOIN active_parser_versions a ON a.cospec_run_id=c.cospec_run_id AND a.parser_version=m.parser_version
+      WHERE json_extract(c.metadata_json,'$.session.role')='subagent' GROUP BY c.cospec_run_id,agent_session_id`).all() as Array<Record<string, unknown>>;
+    const subagentTokenRows = this.database.prepare(`SELECT c.cospec_run_id,
+      json_extract(c.metadata_json,'$.agent_session_id') AS agent_session_id,t.model,COUNT(*) AS observations,
+      COUNT(t.input_tokens) AS input_samples,SUM(t.input_tokens) AS input_tokens,
+      COUNT(t.output_tokens) AS output_samples,SUM(t.output_tokens) AS output_tokens,
+      COUNT(t.cache_read_input_tokens) AS cache_read_samples,SUM(t.cache_read_input_tokens) AS cache_read_input_tokens,
+      COUNT(t.cache_write_or_creation_input_tokens) AS cache_write_samples,SUM(t.cache_write_or_creation_input_tokens) AS cache_write_or_creation_input_tokens,
+      COUNT(t.reasoning_output_tokens) AS reasoning_samples,SUM(t.reasoning_output_tokens) AS reasoning_output_tokens,
+      COUNT(t.reported_total_tokens) AS reported_total_samples,SUM(t.reported_total_tokens) AS reported_total_tokens
+      FROM token_usage_facts t JOIN chunks c ON c.upload_id=t.upload_id
+      JOIN active_parser_versions a ON a.cospec_run_id=c.cospec_run_id AND a.parser_version=t.parser_version
+      WHERE json_extract(c.metadata_json,'$.session.role')='subagent' GROUP BY c.cospec_run_id,agent_session_id,t.model`).all() as Array<Record<string, unknown>>;
 
     const modelsByRun = new Map<string, Set<string>>();
     for (const row of tokenRows) if (row.model !== null) {
@@ -434,6 +464,11 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
       }
     }
     const resources = buildRunResources(selected, selectedMessages, selectedTokens, selectedToolCalls, selectedToolResults, modelsByRun);
+    const subagentUsage = buildSubagentUsage(selected,
+      subagentSessionRows.filter((row) => runIds.has(String(row.cospec_run_id))),
+      subagentMessageRows.filter((row) => runIds.has(String(row.cospec_run_id))),
+      subagentTokenRows.filter((row) => runIds.has(String(row.cospec_run_id))), selectedMessages, selectedTokens,
+      selectedToolCalls, selectedToolResults);
     return {
       filters: { from: filters.from ?? null, to: filters.to ?? null, agentType: filters.agentType ?? null,
         agentVersion: filters.agentVersion ?? null, model: filters.model ?? null },
@@ -450,6 +485,7 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
       models: coverageSummary(selected.length, modelRuns.size, { byModel: Object.fromEntries(Object.entries(byModel).map(([model, totals]) =>
         [model, { ...totals, runs: totals.runs.size }])) }),
       resourceDistribution: resources,
+      subagents: subagentUsage,
     };
   }
 
@@ -864,6 +900,118 @@ function groupRowsBy(rows: Array<Record<string, unknown>>, field: string): Map<s
     const key = String(row[field]); const values = grouped.get(key) ?? []; values.push(row); grouped.set(key, values);
   }
   return grouped;
+}
+
+interface SubagentUsageRow {
+  agentType: string; agentVersion: string; models: Set<string>; sessions: number; maxDepth: number;
+  sessionSpans: number[]; messages: number; inputTokens: number | null; outputTokens: number | null;
+  toolCalls: number; toolWallClockMs: number | null;
+  messageShare: number | null; inputTokenShare: number | null; outputTokenShare: number | null; toolCallShare: number | null;
+}
+
+function buildSubagentUsage(runs: Array<Record<string, unknown>>, sessionRows: Array<Record<string, unknown>>,
+  messageRows: Array<Record<string, unknown>>, childTokenRows: Array<Record<string, unknown>>,
+  allMessageRows: Array<Record<string, unknown>>, allTokenRows: Array<Record<string, unknown>>,
+  allCallRows: Array<Record<string, unknown>>, allResultRows: Array<Record<string, unknown>>): Record<string, unknown> {
+  const eligible = runs.filter((row) => Number(row.subagent_collection) === 1);
+  const sessionsByRun = groupRows(sessionRows);
+  const childMessages = sumRowsByRun(messageRows, "count");
+  const allMessages = sumRowsByRun(allMessageRows, "count");
+  const childTokens = tokenTotalsByRun(childTokenRows);
+  const allTokens = tokenTotalsByRun(allTokenRows);
+  const childCalls = groupRows(allCallRows.filter((row) => row.session_role === "subagent"));
+  const childResults = groupRows(allResultRows.filter((row) => row.session_role === "subagent"));
+  const allCalls = groupRows(allCallRows);
+  const values: SubagentUsageRow[] = eligible.map((run) => {
+    const runId = String(run.cospec_run_id); const sessions = sessionsByRun.get(runId) ?? [];
+    const ids = new Set(sessions.map((row) => String(row.agent_session_id)));
+    const depth = (row: Record<string, unknown>): number => {
+      let result = 1; let parent = row.parent_agent_session_id === null ? null : String(row.parent_agent_session_id); const seen = new Set<string>();
+      while (parent && ids.has(parent) && !seen.has(parent)) {
+        seen.add(parent); result += 1; parent = sessions.find((candidate) => String(candidate.agent_session_id) === parent)?.parent_agent_session_id as string | null ?? null;
+      }
+      return result;
+    };
+    const spans = sessions.flatMap((row) => {
+      const first = timestampMs(row.first_event_at); const last = timestampMs(row.last_event_at);
+      return first !== null && last !== null && last >= first ? [last - first] : [];
+    });
+    const calls = childCalls.get(runId) ?? []; const results = childResults.get(runId) ?? [];
+    const prefixedCalls = calls.map((row) => ({ ...row, call_id: `${row.agent_session_id}:${row.call_id}` }));
+    const prefixedResults = results.map((row) => ({ ...row, call_id: `${row.agent_session_id}:${row.call_id}` }));
+    const duration = calculateToolDurations(prefixedCalls, prefixedResults).overall;
+    const child = childTokens.get(runId) ?? emptyTokenTotals(); const total = allTokens.get(runId) ?? emptyTokenTotals();
+    const messages = childMessages.get(runId) ?? 0; const totalMessages = allMessages.get(runId) ?? 0;
+    const models = new Set(childTokenRows.filter((row) => String(row.cospec_run_id) === runId && row.model !== null).map((row) => String(row.model)));
+    return {
+      agentType: String(run.agent_type), agentVersion: String(run.agent_version), models,
+      sessions: sessions.length, maxDepth: sessions.length ? Math.max(...sessions.map(depth)) : 0, sessionSpans: spans,
+      messages, inputTokens: child.input_tokens, outputTokens: child.output_tokens, toolCalls: calls.length,
+      toolWallClockMs: calls.length === 0 ? 0 : duration.coverage === 1 ? Number(duration.wall_clock_ms) : null,
+      messageShare: ratio(messages, totalMessages), inputTokenShare: ratio(child.input_tokens, total.input_tokens),
+      outputTokenShare: ratio(child.output_tokens, total.output_tokens), toolCallShare: ratio(calls.length, (allCalls.get(runId) ?? []).length),
+    };
+  });
+  return {
+    eligible_runs: eligible.length,
+    excluded_legacy_runs: runs.length - eligible.length,
+    ...subagentGroupMetrics(values),
+    byAgent: groupedSubagentMetrics(values, (row) => [row.agentType]),
+    byAgentVersion: groupedSubagentMetrics(values, (row) => [`${row.agentType}@${row.agentVersion}`]),
+    byModel: groupedSubagentMetrics(values, (row) => [...row.models]),
+    modelGroupingNote: "multi_model_subagent_run_is_included_in_each_model_group",
+  };
+}
+
+function subagentGroupMetrics(values: SubagentUsageRow[]): Record<string, unknown> {
+  const withSubagents = values.filter((row) => row.sessions > 0).length;
+  return {
+    runs_with_subagents: withSubagents,
+    runs_without_subagents: values.length - withSubagents,
+    usage_rate: values.length ? withSubagents / values.length : null,
+    sessions: { total: values.reduce((sum, row) => sum + row.sessions, 0),
+      per_run: metricDistribution(values.map((row) => row.sessions)),
+      max_depth_per_run: metricDistribution(values.map((row) => row.maxDepth)),
+      span_ms: metricDistribution(values.flatMap((row) => row.sessionSpans)) },
+    messages: { total: values.reduce((sum, row) => sum + row.messages, 0), per_run: metricDistribution(values.map((row) => row.messages)) },
+    input_tokens: nullableTotalAndDistribution(values.map((row) => row.inputTokens)),
+    output_tokens: nullableTotalAndDistribution(values.map((row) => row.outputTokens)),
+    tools: { calls: values.reduce((sum, row) => sum + row.toolCalls, 0), calls_per_run: metricDistribution(values.map((row) => row.toolCalls)),
+      wall_clock_ms_per_run: metricDistribution(values.map((row) => row.toolWallClockMs)) },
+    resource_share: {
+      messages: metricDistribution(values.map((row) => row.messageShare)),
+      input_tokens: metricDistribution(values.map((row) => row.inputTokenShare)),
+      output_tokens: metricDistribution(values.map((row) => row.outputTokenShare)),
+      tool_calls: metricDistribution(values.map((row) => row.toolCallShare)),
+    },
+  };
+}
+
+function groupedSubagentMetrics(values: SubagentUsageRow[], keys: (row: SubagentUsageRow) => string[]): Record<string, unknown> {
+  const grouped = new Map<string, SubagentUsageRow[]>();
+  for (const value of values) for (const key of keys(value)) { const rows = grouped.get(key) ?? []; rows.push(value); grouped.set(key, rows); }
+  return Object.fromEntries([...grouped].sort(([a], [b]) => a.localeCompare(b)).map(([key, rows]) => [key, subagentGroupMetrics(rows)]));
+}
+
+function sumRowsByRun(rows: Array<Record<string, unknown>>, field: string): Map<string, number> {
+  const totals = new Map<string, number>();
+  for (const row of rows) { const id = String(row.cospec_run_id); totals.set(id, (totals.get(id) ?? 0) + Number(row[field])); }
+  return totals;
+}
+
+function tokenTotalsByRun(rows: Array<Record<string, unknown>>): Map<string, TokenTotals> {
+  const totals = new Map<string, TokenTotals>();
+  for (const row of rows) { const id = String(row.cospec_run_id); const value = totals.get(id) ?? emptyTokenTotals(); addTokenRow(value, row); totals.set(id, value); }
+  return totals;
+}
+
+function nullableTotalAndDistribution(values: Array<number | null>): Record<string, unknown> {
+  const available = values.filter((value): value is number => value !== null);
+  return { total: available.length ? available.reduce((sum, value) => sum + value, 0) : null, per_run: metricDistribution(values) };
+}
+
+function ratio(part: number | null, total: number | null): number | null {
+  return part === null || total === null || total === 0 ? null : part / total;
 }
 
 async function exists(path: string): Promise<boolean> {

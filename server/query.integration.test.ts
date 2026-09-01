@@ -170,6 +170,62 @@ test("run usage summary reports coverage and supports agent, version, model and 
   } finally { await app.close(); repository.close(); }
 });
 
+test("subagent summary excludes legacy runs and reports usage, resources and shares", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cospec-subagent-summary-"));
+  const repository = await DurableChunkRepository.open(root);
+  const claudeRun = randomUUID(); const claudeRootSession = randomUUID(); const childSession = "child-agent";
+  const mainBytes = Buffer.from(`${JSON.stringify({ type: "user", timestamp: "2026-09-01T01:00:00Z",
+    message: { role: "user", content: "private" } })}\n`);
+  const main = metadata(mainBytes, claudeRun, randomUUID(), 0, null);
+  main.source_type = "claude_code_jsonl"; main.environment.agent_type = "claude_code";
+  main.agent_session_id = claudeRootSession;
+  main.session = { role: "main", root_agent_session_id: claudeRootSession, parent_agent_session_id: null };
+  await repository.accept(main, mainBytes);
+  const childBytes = Buffer.from([
+    JSON.stringify({ type: "assistant", timestamp: "2026-09-01T01:00:01Z", message: { role: "assistant", model: "child-model",
+      usage: { input_tokens: 4, output_tokens: 1 }, content: [{ type: "tool_use", id: "child-tool", name: "Read" }] } }),
+    JSON.stringify({ type: "user", timestamp: "2026-09-01T01:00:02Z", message: { role: "user",
+      content: [{ type: "tool_result", tool_use_id: "child-tool", is_error: false }] } }),
+  ].join("\n") + "\n");
+  const child = metadata(childBytes, claudeRun, randomUUID(), 0, null);
+  child.source_type = "claude_code_jsonl"; child.environment.agent_type = "claude_code"; child.agent_session_id = childSession;
+  child.session = { role: "subagent", root_agent_session_id: claudeRootSession, parent_agent_session_id: claudeRootSession };
+  await repository.accept(child, childBytes);
+
+  const codexRun = randomUUID(); const codexBytes = Buffer.from(`${JSON.stringify({ type: "response_item", timestamp: "2026-09-01T02:00:00Z",
+    payload: { type: "message", role: "user", content: "private" } })}\n`);
+  const codex = metadata(codexBytes, codexRun, randomUUID(), 0, null);
+  codex.session = { role: "main", root_agent_session_id: codex.agent_session_id, parent_agent_session_id: null };
+  await repository.accept(codex, codexBytes);
+
+  const legacyBytes = Buffer.from('{"type":"event_msg","timestamp":"2026-09-01T03:00:00Z"}\n');
+  await repository.accept(metadata(legacyBytes, randomUUID(), randomUUID(), 0, null), legacyBytes);
+  await new ParserWorker(repository).runPending();
+  const app = await createIngestApp({ bearerToken: TOKEN, repository, queryRepository: repository });
+  try {
+    const response = await app.inject({ method: "GET", url: "/api/v1/summaries/run-usage",
+      headers: { authorization: `Bearer ${TOKEN}` } });
+    const subagents = response.json().subagents;
+    assert.equal(subagents.eligible_runs, 2);
+    assert.equal(subagents.excluded_legacy_runs, 1);
+    assert.equal(subagents.runs_with_subagents, 1);
+    assert.equal(subagents.runs_without_subagents, 1);
+    assert.equal(subagents.usage_rate, 0.5);
+    assert.deepEqual(subagents.sessions.per_run,
+      { runs_with_data: 2, runs_missing_data: 0, run_coverage: 1, average: 0.5, p50: 0, p90: 1 });
+    assert.equal(subagents.sessions.total, 1);
+    assert.equal(subagents.messages.total, 2);
+    assert.equal(subagents.input_tokens.total, 4);
+    assert.equal(subagents.tools.calls, 1);
+    assert.equal(subagents.tools.wall_clock_ms_per_run.p90, 1000);
+    assert.equal(subagents.resource_share.messages.p90, 2 / 3);
+    assert.equal(subagents.resource_share.input_tokens.p50, 1);
+    assert.equal(subagents.byAgent.claude_code.runs_with_subagents, 1);
+    assert.equal(subagents.byAgent.codex.runs_without_subagents, 1);
+    assert.equal(subagents.byModel["child-model"].sessions.total, 1);
+  } finally { await app.close(); repository.close(); }
+});
+
 function metadata(bytes: Buffer, runId: string, sourceFileId: string, start: number, previous: string | null): ChunkMetadata {
   const now = new Date().toISOString();
   return {
