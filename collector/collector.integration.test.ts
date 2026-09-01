@@ -8,6 +8,16 @@ import test from "node:test";
 
 interface CliResult { ok: boolean; data?: unknown; error?: string }
 
+test("CLI rejects invalid integration parameters with structured JSON and nonzero exit", async () => {
+  const invalidAgent = await cliFailure(["ensure", "--agent", "other", "--session-id", randomUUID(), "--run-id", randomUUID()], process.env);
+  assert.deepEqual(invalidAgent.result, { ok: false, error: "invalid_option:agent" });
+  assert.notEqual(invalidAgent.code, 0);
+  const invalidStatus = await cliFailure(["finish", "--run-id", randomUUID(), "--status", "other"], process.env);
+  assert.deepEqual(invalidStatus.result, { ok: false, error: "invalid_option:status" });
+  const invalidRun = await cliFailure(["finish", "--run-id", "not-a-uuid"], process.env);
+  assert.deepEqual(invalidRun.result, { ok: false, error: "invalid_option:run-id" });
+});
+
 test("CLI, daemon and local mock receiver support complete-line incremental resume", async () => {
   const root = await mkdtemp(join(tmpdir(), "cospec-integration-"));
   const sessionsRoot = join(root, "sessions");
@@ -110,6 +120,19 @@ async function cli(args: string[], env: NodeJS.ProcessEnv): Promise<CliResult> {
       if (code !== 0) { reject(new Error(stderr || stdout || `CLI exited ${code}`)); return; }
       try { resolve(JSON.parse(stdout) as CliResult); }
       catch { reject(new Error(`invalid CLI output: ${stdout}`)); }
+    });
+  });
+}
+
+async function cliFailure(args: string[], env: NodeJS.ProcessEnv): Promise<{ code: number | null; result: CliResult }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [join(process.cwd(), "dist", "collector", "cli.js"), ...args], { env });
+    let stdout = "";
+    child.stdout.setEncoding("utf8").on("data", (value: string) => { stdout += value; });
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      try { resolve({ code, result: JSON.parse(stdout) as CliResult }); }
+      catch { reject(new Error(`invalid CLI failure output: ${stdout}`)); }
     });
   });
 }

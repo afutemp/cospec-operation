@@ -170,6 +170,44 @@ test("Claude Code run reuses chunking and emits isolated source metadata", async
   assert.equal(received[0]?.source_version, "2.1.220");
 });
 
+test("one source failure does not block another source in the same scan cycle", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cospec-multi-source-"));
+  const codexRoot = join(root, "codex");
+  const claudeRoot = join(root, "claude", "-project");
+  const stateDirectory = join(root, "state");
+  const codexSessionId = randomUUID();
+  const claudeSessionId = randomUUID();
+  await mkdir(codexRoot, { recursive: true });
+  await mkdir(claudeRoot, { recursive: true });
+  const codexPath = join(codexRoot, `${codexSessionId}.jsonl`);
+  const claudePath = join(claudeRoot, `${claudeSessionId}.jsonl`);
+  await writeFile(codexPath, `${JSON.stringify({ type: "session_meta", payload: { id: codexSessionId, cli_version: "0.150.1" } })}\n`);
+  await writeFile(claudePath, `${JSON.stringify({ type: "user", sessionId: claudeSessionId, version: "2.1.220" })}\n`);
+  const state = emptyState();
+  const registry = new RunRegistry({ codex: codexRoot, claude_code: join(root, "claude") });
+  await registry.ensure(state, "codex", codexSessionId, randomUUID());
+  await registry.ensure(state, "claude_code", claudeSessionId, randomUUID());
+  const initialOffsets = Object.fromEntries(Object.values(state.files).map((file) => [file.agentType, file.confirmedOffset]));
+  const store = new JsonStateStore(stateDirectory);
+  await store.save(state);
+  await appendFileCompat(codexPath, '{"type":"event_msg"}\n');
+  await appendFileCompat(claudePath, `${JSON.stringify({ type: "assistant", sessionId: claudeSessionId, version: "2.1.220" })}\n`);
+  const accepted: ChunkMetadata[] = [];
+  const receiver: ChunkReceiver = { async accept(metadata) {
+    if (metadata.source_type === "codex_jsonl") throw new Error("upload_network_error");
+    accepted.push(metadata);
+  } };
+  await assert.rejects(new CollectorScanner(store, receiver).scan(), /upload_network_error/);
+  const after = await store.load();
+  const codex = Object.values(after.files).find((file) => file.agentType === "codex")!;
+  const claude = Object.values(after.files).find((file) => file.agentType === "claude_code")!;
+  assert.equal(codex.confirmedOffset, initialOffsets.codex);
+  assert.ok(codex.pendingUpload);
+  assert.ok(claude.confirmedOffset > initialOffsets.claude_code!);
+  assert.equal(claude.pendingUpload, null);
+  assert.equal(accepted[0]?.source_type, "claude_code_jsonl");
+});
+
 test("run binding output conforms to the frozen schema", async () => {
   const item = await fixture();
   const binding = await new RunRegistry(item.root).ensure(emptyState(), "codex", item.sessionId, randomUUID());

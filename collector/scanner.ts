@@ -8,6 +8,10 @@ import type { ChunkMetadata, CollectorState, FileState, RunBinding } from "./typ
 
 export interface ChunkReceiver { accept(metadata: ChunkMetadata, bytes: Buffer): Promise<void> }
 
+export class ScanCycleError extends Error {
+  constructor(message: string, readonly completedChunks: number, readonly completedBytes: number) { super(message); }
+}
+
 export class FileOutboxReceiver implements ChunkReceiver {
   constructor(private readonly directory: string) {}
   async accept(metadata: ChunkMetadata, bytes: Buffer): Promise<void> {
@@ -33,38 +37,42 @@ export class CollectorScanner {
     const state = await this.store.load();
     let chunks = 0;
     let bytes = 0;
+    let firstError: unknown;
     for (const file of Object.values(state.files)) {
-      const run = collectibleRun(state, file);
-      if (!run) continue;
-      const info = await stat(file.canonicalPath, { bigint: true });
-      const identity = `${info.dev}:${info.ino}:${info.birthtimeNs}`;
-      if (identity !== file.observedFileIdentity || BigInt(file.confirmedOffset) > info.size) {
-        const code = identity !== file.observedFileIdentity ? "source_rotated" : "source_truncated";
-        resetGeneration(file, identity, code);
-        await this.store.save(state);
-      }
-      while (true) {
-        const maximumEnd = run.status === "open" ? undefined : run.endOffset ?? undefined;
-        if (maximumEnd !== undefined && file.confirmedOffset >= maximumEnd) break;
-        const chunk = await readNextChunk(file.canonicalPath, file.confirmedOffset, maximumEnd);
-        if (!chunk) break;
-        const metadata = file.pendingUpload ?? metadataFor(file, run, chunk);
-        if (metadata.file.start_offset !== chunk.startOffset || metadata.file.end_offset !== chunk.endOffset || metadata.file.sha256 !== chunk.sha256) {
-          throw new Error("source_changed_during_retry");
-        }
-        if (!file.pendingUpload) {
-          file.pendingUpload = metadata;
+      try {
+        const run = collectibleRun(state, file);
+        if (!run) continue;
+        const info = await stat(file.canonicalPath, { bigint: true });
+        const identity = `${info.dev}:${info.ino}:${info.birthtimeNs}`;
+        if (identity !== file.observedFileIdentity || BigInt(file.confirmedOffset) > info.size) {
+          const code = identity !== file.observedFileIdentity ? "source_rotated" : "source_truncated";
+          resetGeneration(file, identity, code);
           await this.store.save(state);
         }
-        await this.receiver.accept(metadata, chunk.bytes);
-        file.confirmedOffset = chunk.endOffset;
-        file.previousChunkSha256 = chunk.sha256;
-        file.pendingUpload = null;
-        await this.store.save(state);
-        chunks += 1;
-        bytes += chunk.byteCount;
-      }
+        while (true) {
+          const maximumEnd = run.status === "open" ? undefined : run.endOffset ?? undefined;
+          if (maximumEnd !== undefined && file.confirmedOffset >= maximumEnd) break;
+          const chunk = await readNextChunk(file.canonicalPath, file.confirmedOffset, maximumEnd);
+          if (!chunk) break;
+          const metadata = file.pendingUpload ?? metadataFor(file, run, chunk);
+          if (metadata.file.start_offset !== chunk.startOffset || metadata.file.end_offset !== chunk.endOffset || metadata.file.sha256 !== chunk.sha256) {
+            throw new Error("source_changed_during_retry");
+          }
+          if (!file.pendingUpload) {
+            file.pendingUpload = metadata;
+            await this.store.save(state);
+          }
+          await this.receiver.accept(metadata, chunk.bytes);
+          file.confirmedOffset = chunk.endOffset;
+          file.previousChunkSha256 = chunk.sha256;
+          file.pendingUpload = null;
+          await this.store.save(state);
+          chunks += 1;
+          bytes += chunk.byteCount;
+        }
+      } catch (error) { firstError ??= error; }
     }
+    if (firstError) throw new ScanCycleError(firstError instanceof Error ? firstError.message : "scan_failed", chunks, bytes);
     return { chunks, bytes };
   }
 }

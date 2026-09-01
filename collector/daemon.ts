@@ -3,7 +3,7 @@ import { getClaudeCodeSessionsRoot, getCodexSessionsRoot, getIpcEndpoint, getSta
 import { listen } from "./ipc.js";
 import { RunRegistry } from "./runs.js";
 import { JsonStateStore } from "./state.js";
-import { CollectorScanner, FileOutboxReceiver, type ChunkReceiver } from "./scanner.js";
+import { CollectorScanner, FileOutboxReceiver, ScanCycleError, type ChunkReceiver } from "./scanner.js";
 import { HttpChunkReceiver } from "./http-receiver.js";
 import { CollectorEventLog } from "./event-log.js";
 import type { CollectorCommand, CollectorDiagnostics, CollectorState, CommandResponse } from "./types.js";
@@ -67,6 +67,12 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Server> 
       if (result.chunks > 0) await eventLog.write({ level: "info", event: "chunks_uploaded", chunks: result.chunks, bytes: result.bytes });
       return result;
     } catch (error) {
+      if (error instanceof ScanCycleError && error.completedChunks > 0) {
+        const current = await store.load();
+        ensureDiagnostics(current).lastSuccessAt = lastScanAt;
+        await store.save(current);
+        await eventLog.write({ level: "info", event: "chunks_uploaded", chunks: error.completedChunks, bytes: error.completedBytes });
+      }
       await recordFailure(store, eventLog, lastScanAt, error);
       throw error;
     }

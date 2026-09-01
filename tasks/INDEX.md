@@ -17,5 +17,6 @@
 | POC-12 | [验证服务端宕机后的自动续传](POC-12-outage-recovery-e2e.md) | 当前 Linux 环境通过 |
 | POC-13 | [调整 Collector 默认扫描频率](POC-13-scan-cadence.md) | 已完成 |
 | POC-14 | [接入 Claude Code JSONL 数据源](POC-14-claude-code-source.md) | 已完成 |
+| POC-15 | [双数据源并行验收与调用契约冻结](POC-15-multi-source-concurrency.md) | 已完成 |
 
-`POC-01/01A` 已冻结，`POC-02/03/04/05/06/07/09/10/11/13/14` 已完成；`POC-08/12` 当前 Linux 环境验收通过，Windows 实机项保持待验证。协议见 [upload-protocol-v0.1.md](../docs/upload-protocol-v0.1.md) 和 [collector-lifecycle-v0.1.md](../docs/collector-lifecycle-v0.1.md)，JSON Schema位于 `contracts/`。任务编号只在本 PoC 仓库内使用，不与历史 `REC/COL/SRV/UI` 任务混用。
+`POC-01/01A` 已冻结，`POC-02/03/04/05/06/07/09/10/11/13/14/15` 已完成；`POC-08/12` 当前 Linux 环境验收通过，Windows 实机项保持待验证。协议见 [upload-protocol-v0.1.md](../docs/upload-protocol-v0.1.md)、[collector-lifecycle-v0.1.md](../docs/collector-lifecycle-v0.1.md) 和 [Collector 调用契约 0.1](../docs/collector-integration-contract-v0.1.md)。JSON Schema 位于 `contracts/`。
