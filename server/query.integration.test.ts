@@ -99,11 +99,19 @@ test("run usage summary reports coverage and supports agent, version, model and 
   const root = await mkdtemp(join(tmpdir(), "cospec-run-usage-"));
   const repository = await DurableChunkRepository.open(root);
   const claudeRun = randomUUID();
-  const claudeBytes = Buffer.from(`${JSON.stringify({ type: "assistant", timestamp: "2026-08-30T01:00:00Z", message: {
-    role: "assistant", model: "claude-test", usage: { input_tokens: 10, output_tokens: 4, cache_read_input_tokens: 3 }, content: [] } })}\n`);
+  const claudeBytes = Buffer.from([
+    JSON.stringify({ type: "assistant", timestamp: "2026-08-30T01:00:00Z", message: {
+      role: "assistant", model: "claude-test", usage: { input_tokens: 10, output_tokens: 4, cache_read_input_tokens: 3 },
+      content: [{ type: "tool_use", id: "summary-tool", name: "Read" }] } }),
+    JSON.stringify({ type: "assistant", timestamp: "2026-08-30T01:00:01Z", message: {
+      role: "assistant", model: "claude-alt", usage: { input_tokens: 6, output_tokens: 2 }, content: [] } }),
+    JSON.stringify({ type: "user", timestamp: "2026-08-30T01:00:02Z", message: {
+      role: "user", content: [{ type: "tool_result", tool_use_id: "summary-tool", is_error: false }] } }),
+  ].join("\n") + "\n");
   const claude = metadata(claudeBytes, claudeRun, randomUUID(), 0, null);
   claude.source_type = "claude_code_jsonl"; claude.source_version = "2.1.220";
   claude.environment.agent_type = "claude_code"; claude.environment.agent_version = "2.1.220";
+  claude.file.line_count = 3;
   await repository.accept(claude, claudeBytes);
 
   const codexRun = randomUUID();
@@ -125,10 +133,10 @@ test("run usage summary reports coverage and supports agent, version, model and 
     const summary = response.json();
     assert.equal(summary.runs.total, 3);
     assert.deepEqual(summary.runs.byAgent, { claude_code: 1, codex: 2 });
-    assert.equal(summary.messages.total, 1);
+    assert.equal(summary.messages.total, 3);
     assert.equal(summary.messages.runs_with_data, 1);
     assert.equal(summary.messages.runs_missing_data, 2);
-    assert.equal(summary.tokens.input_tokens, 30);
+    assert.equal(summary.tokens.input_tokens, 36);
     assert.equal(summary.tokens.runs_with_data, 2);
     assert.equal(summary.tokens.run_coverage, 2 / 3);
     assert.deepEqual(summary.tokens.field_run_coverage.cache_read_input_tokens,
@@ -138,7 +146,18 @@ test("run usage summary reports coverage and supports agent, version, model and 
       input_tokens: 10, output_tokens: 4,
       cache_read_input_tokens: 3, cache_write_or_creation_input_tokens: null, reasoning_output_tokens: null,
       reported_total_tokens: null, runs: 1 });
+    assert.equal(summary.models.byModel["claude-alt"].runs, 1);
     assert.equal(summary.models.runs_missing_data, 2);
+    assert.deepEqual(summary.resourceDistribution.overall.run_span_ms,
+      { runs_with_data: 2, runs_missing_data: 1, run_coverage: 2 / 3, average: 1000, p50: 0, p90: 2000 });
+    assert.deepEqual(summary.resourceDistribution.overall.input_tokens_per_run,
+      { runs_with_data: 2, runs_missing_data: 1, run_coverage: 2 / 3, average: 18, p50: 16, p90: 20 });
+    assert.deepEqual(summary.resourceDistribution.overall.tool_wall_clock_ms_per_run,
+      { runs_with_data: 3, runs_missing_data: 0, run_coverage: 1, average: 2000 / 3, p50: 0, p90: 2000 });
+    assert.equal(summary.resourceDistribution.byAgent.claude_code.runs, 1);
+    assert.equal(summary.resourceDistribution.byAgentVersion["claude_code@2.1.220"].runs, 1);
+    assert.equal(summary.resourceDistribution.byModel["claude-test"].runs, 1);
+    assert.equal(summary.resourceDistribution.byModel["claude-alt"].runs, 1);
 
     const filtered = await app.inject({ method: "GET",
       url: "/api/v1/summaries/run-usage?agentType=claude_code&agentVersion=2.1.220&model=claude-test&from=2026-08-30T00:00:00Z&to=2026-08-30T23:59:59Z", headers });

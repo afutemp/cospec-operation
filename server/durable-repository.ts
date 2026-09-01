@@ -322,7 +322,8 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
       MIN(json_extract(c.metadata_json,'$.environment.agent_type')) AS agent_type,
       MIN(json_extract(c.metadata_json,'$.environment.agent_version')) AS agent_version,
       MIN(c.received_at) AS first_received_at,a.parser_version,
-      MIN(CASE WHEN p.parser_version=a.parser_version THEN p.first_timestamp END) AS first_event_at
+      MIN(CASE WHEN p.parser_version=a.parser_version THEN p.first_timestamp END) AS first_event_at,
+      MAX(CASE WHEN p.parser_version=a.parser_version THEN p.last_timestamp END) AS last_event_at
       FROM chunks c LEFT JOIN active_parser_versions a ON a.cospec_run_id=c.cospec_run_id
       LEFT JOIN parse_results p ON p.upload_id=c.upload_id
       GROUP BY c.cospec_run_id`).all() as Array<Record<string, unknown>>;
@@ -340,6 +341,14 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
       FROM token_usage_facts t JOIN chunks c ON c.upload_id=t.upload_id
       JOIN active_parser_versions a ON a.cospec_run_id=c.cospec_run_id AND a.parser_version=t.parser_version
       GROUP BY c.cospec_run_id,t.parser_version,t.model`).all() as Array<Record<string, unknown>>;
+    const toolCallRows = this.database.prepare(`SELECT c.cospec_run_id,f.call_id,f.tool_name,f.timestamp
+      FROM tool_call_facts f JOIN chunks c ON c.upload_id=f.upload_id
+      JOIN active_parser_versions a ON a.cospec_run_id=c.cospec_run_id AND a.parser_version=f.parser_version
+      ORDER BY c.cospec_run_id,f.record_index,f.item_index`).all() as Array<Record<string, unknown>>;
+    const toolResultRows = this.database.prepare(`SELECT c.cospec_run_id,f.call_id,f.timestamp
+      FROM tool_result_facts f JOIN chunks c ON c.upload_id=f.upload_id
+      JOIN active_parser_versions a ON a.cospec_run_id=c.cospec_run_id AND a.parser_version=f.parser_version
+      ORDER BY c.cospec_run_id,f.record_index,f.item_index`).all() as Array<Record<string, unknown>>;
 
     const modelsByRun = new Map<string, Set<string>>();
     for (const row of tokenRows) if (row.model !== null) {
@@ -356,6 +365,8 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
     const runIds = new Set(selected.map((row) => String(row.cospec_run_id)));
     const selectedMessages = messageRows.filter((row) => runIds.has(String(row.cospec_run_id)));
     const selectedTokens = tokenRows.filter((row) => runIds.has(String(row.cospec_run_id)));
+    const selectedToolCalls = toolCallRows.filter((row) => runIds.has(String(row.cospec_run_id)));
+    const selectedToolResults = toolResultRows.filter((row) => runIds.has(String(row.cospec_run_id)));
 
     const byAgent: Record<string, number> = {};
     const byAgentVersion: Record<string, number> = {};
@@ -389,6 +400,7 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
         addTokenRow(byModel[model], row); byModel[model].runs.add(runId);
       }
     }
+    const resources = buildRunResources(selected, selectedMessages, selectedTokens, selectedToolCalls, selectedToolResults, modelsByRun);
     return {
       filters: { from: filters.from ?? null, to: filters.to ?? null, agentType: filters.agentType ?? null,
         agentVersion: filters.agentVersion ?? null, model: filters.model ?? null },
@@ -404,6 +416,7 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
           coverageCounts(selected.length, tokenFieldRuns[field].size)])) }),
       models: coverageSummary(selected.length, modelRuns.size, { byModel: Object.fromEntries(Object.entries(byModel).map(([model, totals]) =>
         [model, { ...totals, runs: totals.runs.size }])) }),
+      resourceDistribution: resources,
     };
   }
 
@@ -662,6 +675,95 @@ function coverageCounts(totalRuns: number, observedRuns: number): Record<string,
 function average(total: number | null, count: number): number | null { return total === null || count === 0 ? null : total / count; }
 
 function increment(target: Record<string, number>, key: string, amount = 1): void { target[key] = (target[key] ?? 0) + amount; }
+
+interface RunResources {
+  agentType: string; agentVersion: string; models: Set<string>;
+  runSpanMs: number | null; messages: number | null; inputTokens: number | null; outputTokens: number | null;
+  toolCalls: number | null; toolWallClockMs: number | null;
+}
+
+function buildRunResources(
+  runs: Array<Record<string, unknown>>,
+  messages: Array<Record<string, unknown>>,
+  tokens: Array<Record<string, unknown>>,
+  calls: Array<Record<string, unknown>>,
+  results: Array<Record<string, unknown>>,
+  modelsByRun: Map<string, Set<string>>,
+): Record<string, unknown> {
+  const messageTotals = new Map<string, number>();
+  for (const row of messages) messageTotals.set(String(row.cospec_run_id), (messageTotals.get(String(row.cospec_run_id)) ?? 0) + Number(row.count));
+  const tokenTotals = new Map<string, TokenTotals>();
+  for (const row of tokens) {
+    const runId = String(row.cospec_run_id); const total = tokenTotals.get(runId) ?? emptyTokenTotals();
+    addTokenRow(total, row); tokenTotals.set(runId, total);
+  }
+  const callsByRun = groupRows(calls);
+  const resultsByRun = groupRows(results);
+  const values: RunResources[] = runs.map((row) => {
+    const runId = String(row.cospec_run_id);
+    const parsed = row.parser_version !== null;
+    const runCalls = callsByRun.get(runId) ?? [];
+    const duration = calculateToolDurations(runCalls, resultsByRun.get(runId) ?? []).overall;
+    const first = timestampMs(row.first_event_at); const last = timestampMs(row.last_event_at);
+    return {
+      agentType: String(row.agent_type), agentVersion: String(row.agent_version), models: modelsByRun.get(runId) ?? new Set<string>(),
+      runSpanMs: first !== null && last !== null && last >= first ? last - first : null,
+      messages: parsed ? (messageTotals.get(runId) ?? 0) : null,
+      inputTokens: tokenTotals.get(runId)?.input_tokens ?? null,
+      outputTokens: tokenTotals.get(runId)?.output_tokens ?? null,
+      toolCalls: parsed ? runCalls.length : null,
+      toolWallClockMs: !parsed ? null : runCalls.length === 0 ? 0 : duration.coverage === 1 ? Number(duration.wall_clock_ms) : null,
+    };
+  });
+  return {
+    overall: resourceMetrics(values),
+    byAgent: groupedResourceMetrics(values, (row) => [row.agentType]),
+    byAgentVersion: groupedResourceMetrics(values, (row) => [`${row.agentType}@${row.agentVersion}`]),
+    byModel: groupedResourceMetrics(values, (row) => [...row.models]),
+    modelGroupingNote: "multi_model_run_is_included_in_each_model_group",
+  };
+}
+
+function groupRows(rows: Array<Record<string, unknown>>): Map<string, Array<Record<string, unknown>>> {
+  const grouped = new Map<string, Array<Record<string, unknown>>>();
+  for (const row of rows) {
+    const runId = String(row.cospec_run_id); const values = grouped.get(runId) ?? [];
+    values.push(row); grouped.set(runId, values);
+  }
+  return grouped;
+}
+
+function groupedResourceMetrics(values: RunResources[], keys: (value: RunResources) => string[]): Record<string, unknown> {
+  const grouped = new Map<string, RunResources[]>();
+  for (const value of values) for (const key of keys(value)) {
+    const rows = grouped.get(key) ?? []; rows.push(value); grouped.set(key, rows);
+  }
+  return Object.fromEntries([...grouped].sort(([left], [right]) => left.localeCompare(right)).map(([key, rows]) => [key, resourceMetrics(rows)]));
+}
+
+function resourceMetrics(values: RunResources[]): Record<string, unknown> {
+  return {
+    runs: values.length,
+    run_span_ms: metricDistribution(values.map((row) => row.runSpanMs)),
+    messages_per_run: metricDistribution(values.map((row) => row.messages)),
+    input_tokens_per_run: metricDistribution(values.map((row) => row.inputTokens)),
+    output_tokens_per_run: metricDistribution(values.map((row) => row.outputTokens)),
+    tool_calls_per_run: metricDistribution(values.map((row) => row.toolCalls)),
+    tool_wall_clock_ms_per_run: metricDistribution(values.map((row) => row.toolWallClockMs)),
+  };
+}
+
+function metricDistribution(values: Array<number | null>): Record<string, number | null> {
+  const measured = values.filter((value): value is number => value !== null).sort((a, b) => a - b);
+  return {
+    runs_with_data: measured.length,
+    runs_missing_data: values.length - measured.length,
+    run_coverage: values.length === 0 ? null : measured.length / values.length,
+    average: measured.length ? measured.reduce((sum, value) => sum + value, 0) / measured.length : null,
+    p50: percentile(measured, 0.5),
+    p90: percentile(measured, 0.9),
+  };
+}
 
 async function exists(path: string): Promise<boolean> {
   try { await access(path); return true; }
