@@ -170,6 +170,59 @@ test("Claude Code run reuses chunking and emits isolated source metadata", async
   assert.equal(received[0]?.source_version, "2.1.220");
 });
 
+test("Codex run discovers and uploads only subagents spawned inside its offset boundary", async () => {
+  const item = await fixture();
+  const stateDirectory = await mkdtemp(join(tmpdir(), "cospec-codex-subagent-"));
+  const state = emptyState(); const registry = new RunRegistry(item.root); const runId = randomUUID();
+  await registry.ensure(state, "codex", item.sessionId, runId);
+  const childId = randomUUID(); const childPathName = "/root/research"; const callId = "spawn-call";
+  await appendFileCompat(item.path, [
+    JSON.stringify({ type: "response_item", timestamp: "2026-09-01T01:00:00Z", payload: {
+      type: "function_call", name: "spawn_agent", call_id: callId, input: JSON.stringify({ task_name: "research", message: "private", fork_turns: "all" }) } }),
+    JSON.stringify({ type: "response_item", timestamp: "2026-09-01T01:00:01Z", payload: {
+      type: "function_call_output", call_id: callId, output: JSON.stringify({ task_name: childPathName }) } }),
+  ].join("\n") + "\n");
+  const childPath = join(item.root, `child-${childId}.jsonl`);
+  await writeFile(childPath, [
+    JSON.stringify({ type: "session_meta", payload: { id: childId, cli_version: "0.150.1", parent_thread_id: item.sessionId,
+      agent_path: childPathName, source: { subagent: true } } }),
+    JSON.stringify({ type: "response_item", timestamp: "2026-09-01T01:00:02Z", payload: { type: "message", role: "assistant", content: "private" } }),
+  ].join("\n") + "\n");
+  assert.equal(await registry.discoverSubagents(state), 1);
+  const child = Object.values(state.files).find((file) => file.sessionRole === "subagent")!;
+  assert.equal(child.agentSessionId, childId);
+  assert.equal(child.parentAgentSessionId, item.sessionId);
+  const store = new JsonStateStore(stateDirectory); await store.save(state);
+  const received: ChunkMetadata[] = [];
+  await new CollectorScanner(store, { async accept(metadata) { received.push(metadata); } }).scan();
+  const childUpload = received.find((metadata) => metadata.session?.role === "subagent")!;
+  assert.equal(childUpload.cospec_run_id, runId);
+  assert.equal(childUpload.agent_session_id, childId);
+  assert.equal(childUpload.session?.root_agent_session_id, item.sessionId);
+  assert.equal(childUpload.session?.parent_agent_session_id, item.sessionId);
+  assert.equal(JSON.stringify(childUpload).includes("private"), false);
+});
+
+test("Claude Code run discovers a child file from an agentId result", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cospec-claude-subagent-"));
+  const project = join(root, "-project"); const sessionId = randomUUID();
+  await mkdir(project, { recursive: true });
+  const mainPath = join(project, `${sessionId}.jsonl`);
+  await writeFile(mainPath, `${JSON.stringify({ type: "user", sessionId, version: "2.1.220" })}\n`);
+  const state = emptyState(); const registry = new RunRegistry({ codex: join(root, "codex"), claude_code: root });
+  await registry.ensure(state, "claude_code", sessionId, randomUUID());
+  const agentId = "a1b2c3";
+  await appendFileCompat(mainPath, `${JSON.stringify({ type: "user", sessionId, version: "2.1.220", toolUseResult: { agentId } })}\n`);
+  const childDirectory = join(project, sessionId, "subagents"); await mkdir(childDirectory, { recursive: true });
+  await writeFile(join(childDirectory, `agent-${agentId}.jsonl`), `${JSON.stringify({ type: "assistant", sessionId, agentId,
+    version: "2.1.220", timestamp: "2026-09-01T01:00:00Z", message: { role: "assistant", content: "private" } })}\n`);
+  assert.equal(await registry.discoverSubagents(state), 1);
+  const child = Object.values(state.files).find((file) => file.sessionRole === "subagent")!;
+  assert.equal(child.agentSessionId, agentId);
+  assert.equal(child.parentAgentSessionId, sessionId);
+  assert.equal(child.sourceVersion, "2.1.220");
+});
+
 test("one source failure does not block another source in the same scan cycle", async () => {
   const root = await mkdtemp(join(tmpdir(), "cospec-multi-source-"));
   const codexRoot = join(root, "codex");

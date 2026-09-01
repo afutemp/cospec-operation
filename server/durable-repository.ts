@@ -314,13 +314,46 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
       })) },
       interval: { firstEventAt: time.first_event_at ?? null, lastEventAt: time.last_event_at ?? null, semantics: "host_record_span" },
       attribution: { run: "explicit_jsonl_offset_interval", skill: "unavailable" },
+      subagents: this.getRunSubagentFacts(runId, version),
     };
+  }
+
+  private getRunSubagentFacts(runId: string, version: string): Record<string, unknown> {
+    const sessions = this.database.prepare(`SELECT
+      json_extract(c.metadata_json,'$.agent_session_id') AS agent_session_id,
+      json_extract(c.metadata_json,'$.session.parent_agent_session_id') AS parent_agent_session_id,
+      MIN(p.first_timestamp) AS first_event_at,MAX(p.last_timestamp) AS last_event_at,
+      MAX(CASE WHEN p.status IN ('completed','completed_with_errors') THEN 1 ELSE 0 END) AS parsed
+      FROM chunks c LEFT JOIN parse_results p ON p.upload_id=c.upload_id AND p.parser_version=?
+      WHERE c.cospec_run_id=? AND json_extract(c.metadata_json,'$.session.role')='subagent'
+      GROUP BY agent_session_id,parent_agent_session_id ORDER BY agent_session_id`).all(version, runId) as Array<Record<string, unknown>>;
+    const messages = this.database.prepare(`SELECT json_extract(c.metadata_json,'$.agent_session_id') AS agent_session_id,m.role,COUNT(*) AS count
+      FROM message_facts m JOIN chunks c ON c.upload_id=m.upload_id WHERE c.cospec_run_id=? AND m.parser_version=?
+      AND json_extract(c.metadata_json,'$.session.role')='subagent' GROUP BY agent_session_id,m.role`).all(runId, version) as Array<Record<string, unknown>>;
+    const tokens = this.database.prepare(`SELECT json_extract(c.metadata_json,'$.agent_session_id') AS agent_session_id,t.model,COUNT(*) AS observations,
+      COUNT(t.input_tokens) AS input_samples,SUM(t.input_tokens) AS input_tokens,
+      COUNT(t.output_tokens) AS output_samples,SUM(t.output_tokens) AS output_tokens,
+      COUNT(t.cache_read_input_tokens) AS cache_read_samples,SUM(t.cache_read_input_tokens) AS cache_read_input_tokens,
+      COUNT(t.cache_write_or_creation_input_tokens) AS cache_write_samples,SUM(t.cache_write_or_creation_input_tokens) AS cache_write_or_creation_input_tokens,
+      COUNT(t.reasoning_output_tokens) AS reasoning_samples,SUM(t.reasoning_output_tokens) AS reasoning_output_tokens,
+      COUNT(t.reported_total_tokens) AS reported_total_samples,SUM(t.reported_total_tokens) AS reported_total_tokens
+      FROM token_usage_facts t JOIN chunks c ON c.upload_id=t.upload_id WHERE c.cospec_run_id=? AND t.parser_version=?
+      AND json_extract(c.metadata_json,'$.session.role')='subagent' GROUP BY agent_session_id,t.model`).all(runId, version) as Array<Record<string, unknown>>;
+    const calls = this.database.prepare(`SELECT json_extract(c.metadata_json,'$.agent_session_id') AS agent_session_id,
+      f.call_id,f.tool_name,f.timestamp FROM tool_call_facts f JOIN chunks c ON c.upload_id=f.upload_id WHERE c.cospec_run_id=? AND f.parser_version=?
+      AND json_extract(c.metadata_json,'$.session.role')='subagent'`).all(runId, version) as Array<Record<string, unknown>>;
+    const results = this.database.prepare(`SELECT json_extract(c.metadata_json,'$.agent_session_id') AS agent_session_id,
+      f.call_id,f.timestamp FROM tool_result_facts f JOIN chunks c ON c.upload_id=f.upload_id WHERE c.cospec_run_id=? AND f.parser_version=?
+      AND json_extract(c.metadata_json,'$.session.role')='subagent'`).all(runId, version) as Array<Record<string, unknown>>;
+    return summarizeSubagents(sessions, messages, tokens, calls, results);
   }
 
   getRunUsageSummary(filters: RunUsageFilters): Record<string, unknown> {
     const runRows = this.database.prepare(`SELECT c.cospec_run_id,
-      MIN(json_extract(c.metadata_json,'$.environment.agent_type')) AS agent_type,
-      MIN(json_extract(c.metadata_json,'$.environment.agent_version')) AS agent_version,
+      COALESCE(MIN(CASE WHEN json_extract(c.metadata_json,'$.session.role')='main' OR json_extract(c.metadata_json,'$.session.role') IS NULL
+        THEN json_extract(c.metadata_json,'$.environment.agent_type') END),MIN(json_extract(c.metadata_json,'$.environment.agent_type'))) AS agent_type,
+      COALESCE(MIN(CASE WHEN json_extract(c.metadata_json,'$.session.role')='main' OR json_extract(c.metadata_json,'$.session.role') IS NULL
+        THEN json_extract(c.metadata_json,'$.environment.agent_version') END),MIN(json_extract(c.metadata_json,'$.environment.agent_version'))) AS agent_version,
       MIN(c.received_at) AS first_received_at,a.parser_version,
       MIN(CASE WHEN p.parser_version=a.parser_version THEN p.first_timestamp END) AS first_event_at,
       MAX(CASE WHEN p.parser_version=a.parser_version THEN p.last_timestamp END) AS last_event_at
@@ -517,10 +550,14 @@ function streamKey(metadata: ChunkMetadata): string {
 
 function runSummarySql(): string {
   return `SELECT c.cospec_run_id,
-    MIN(json_extract(c.metadata_json,'$.agent_session_id')) AS agent_session_id,
-    MIN(json_extract(c.metadata_json,'$.source_type')) AS source_type,
-    MIN(json_extract(c.metadata_json,'$.source_version')) AS source_version,
-    MIN(json_extract(c.metadata_json,'$.environment.agent_type')) AS agent_type,
+    COALESCE(MIN(CASE WHEN json_extract(c.metadata_json,'$.session.role')='main' OR json_extract(c.metadata_json,'$.session.role') IS NULL
+      THEN json_extract(c.metadata_json,'$.agent_session_id') END),MIN(json_extract(c.metadata_json,'$.agent_session_id'))) AS agent_session_id,
+    COALESCE(MIN(CASE WHEN json_extract(c.metadata_json,'$.session.role')='main' OR json_extract(c.metadata_json,'$.session.role') IS NULL
+      THEN json_extract(c.metadata_json,'$.source_type') END),MIN(json_extract(c.metadata_json,'$.source_type'))) AS source_type,
+    COALESCE(MIN(CASE WHEN json_extract(c.metadata_json,'$.session.role')='main' OR json_extract(c.metadata_json,'$.session.role') IS NULL
+      THEN json_extract(c.metadata_json,'$.source_version') END),MIN(json_extract(c.metadata_json,'$.source_version'))) AS source_version,
+    COALESCE(MIN(CASE WHEN json_extract(c.metadata_json,'$.session.role')='main' OR json_extract(c.metadata_json,'$.session.role') IS NULL
+      THEN json_extract(c.metadata_json,'$.environment.agent_type') END),MIN(json_extract(c.metadata_json,'$.environment.agent_type'))) AS agent_type,
     COUNT(*) AS chunk_count,SUM(c.end_offset-c.start_offset) AS byte_count,
     MIN(c.start_offset) AS start_offset,MAX(c.end_offset) AS end_offset,
     MIN(c.received_at) AS first_received_at,MAX(c.received_at) AS last_received_at,
@@ -763,6 +800,70 @@ function metricDistribution(values: Array<number | null>): Record<string, number
     p50: percentile(measured, 0.5),
     p90: percentile(measured, 0.9),
   };
+}
+
+function summarizeSubagents(sessions: Array<Record<string, unknown>>, messages: Array<Record<string, unknown>>,
+  tokens: Array<Record<string, unknown>>, calls: Array<Record<string, unknown>>, results: Array<Record<string, unknown>>): Record<string, unknown> {
+  const messagesBySession = groupRowsBy(messages, "agent_session_id");
+  const tokensBySession = groupRowsBy(tokens, "agent_session_id");
+  const callsBySession = groupRowsBy(calls, "agent_session_id");
+  const resultsBySession = groupRowsBy(results, "agent_session_id");
+  const allTokenTotals = emptyTokenTotals();
+  const models: Record<string, ModelTotals> = {};
+  for (const row of tokens) {
+    addTokenRow(allTokenTotals, row);
+    if (row.model !== null) {
+      const model = String(row.model); models[model] ??= emptyModelTotals(); addTokenRow(models[model], row);
+      models[model].runs.add(String(row.agent_session_id));
+    }
+  }
+  const prefixedCalls = calls.map((row) => ({ ...row, call_id: `${row.agent_session_id}:${row.call_id}` }));
+  const prefixedResults = results.map((row) => ({ ...row, call_id: `${row.agent_session_id}:${row.call_id}` }));
+  const items = sessions.map((session) => {
+    const id = String(session.agent_session_id);
+    const roleRows = messagesBySession.get(id) ?? [];
+    const byRole = Object.fromEntries(roleRows.map((row) => [String(row.role), Number(row.count)]));
+    const sessionTokens = emptyTokenTotals(); for (const row of tokensBySession.get(id) ?? []) addTokenRow(sessionTokens, row);
+    const sessionCalls = callsBySession.get(id) ?? []; const sessionResults = resultsBySession.get(id) ?? [];
+    const first = timestampMs(session.first_event_at); const last = timestampMs(session.last_event_at);
+    return {
+      agentSessionId: id, parentAgentSessionId: session.parent_agent_session_id === null ? null : String(session.parent_agent_session_id),
+      parsed: Number(session.parsed) === 1,
+      recordSpanMs: first !== null && last !== null && last >= first ? last - first : null,
+      messages: { total: roleRows.reduce((sum, row) => sum + Number(row.count), 0), byRole },
+      tokens: sessionTokens,
+      tools: { calls: sessionCalls.length, duration: calculateToolDurations(sessionCalls, sessionResults).overall },
+      models: [...new Set((tokensBySession.get(id) ?? []).flatMap((row) => row.model === null ? [] : [String(row.model)]))].sort(),
+    };
+  });
+  const sessionIds = new Set(items.map((item) => item.agentSessionId));
+  const depth = (item: typeof items[number]): number => {
+    let value = 1; let parent = item.parentAgentSessionId; const visited = new Set<string>();
+    while (parent && sessionIds.has(parent) && !visited.has(parent)) {
+      visited.add(parent); value += 1; parent = items.find((candidate) => candidate.agentSessionId === parent)?.parentAgentSessionId ?? null;
+    }
+    return value;
+  };
+  return {
+    count: items.length,
+    parsed_sessions: items.filter((item) => item.parsed).length,
+    max_depth: items.length ? Math.max(...items.map(depth)) : 0,
+    messages: { total: items.reduce((sum, item) => sum + item.messages.total, 0) },
+    tokens: allTokenTotals,
+    tools: { calls: calls.length, duration: calculateToolDurations(prefixedCalls, prefixedResults).overall },
+    byModel: Object.fromEntries(Object.entries(models).map(([model, totals]) => {
+      const { runs, ...data } = totals; return [model, { ...data, sessions: runs.size }];
+    })),
+    sessions: items,
+  };
+}
+
+function groupRowsBy(rows: Array<Record<string, unknown>>, field: string): Map<string, Array<Record<string, unknown>>> {
+  const grouped = new Map<string, Array<Record<string, unknown>>>();
+  for (const row of rows) {
+    const key = String(row[field]); const values = grouped.get(key) ?? []; values.push(row); grouped.set(key, values);
+  }
+  return grouped;
 }
 
 async function exists(path: string): Promise<boolean> {

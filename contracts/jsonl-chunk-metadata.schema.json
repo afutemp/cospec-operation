@@ -25,6 +25,16 @@
     "agent_session_id": { "type": "string", "minLength": 1, "maxLength": 255 },
     "collected_at": { "type": "string", "format": "date-time" },
     "collector_version": { "type": "string", "minLength": 1 },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "root_agent_session_id", "parent_agent_session_id"],
+      "properties": {
+        "role": { "enum": ["main", "subagent"] },
+        "root_agent_session_id": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "parent_agent_session_id": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1, "maxLength": 255 }] }
+      }
+    },
     "file": {
       "type": "object",
       "additionalProperties": false,

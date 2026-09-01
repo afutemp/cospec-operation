@@ -24,6 +24,11 @@ source   = 原始 JSONL 字节块
   "agent_session_id": "Codex session_meta.payload.id",
   "collected_at": "RFC3339 timestamp",
   "collector_version": "collector version",
+  "session": {
+    "role": "main",
+    "root_agent_session_id": "agent-session-id",
+    "parent_agent_session_id": null
+  },
   "file": {
     "source_file_id": "collector-local stable UUID",
     "generation": 1,
@@ -47,6 +52,8 @@ source   = 原始 JSONL 字节块
   }
 }
 ```
+
+`session` 是 2026-09-01 增加的向后兼容可选对象。新版 Collector 对主会话和显式关联的子代理都会写入；旧包缺失时，服务端不得猜测主子关系。子代理使用自己的 `agent_session_id`，并通过 `root_agent_session_id`、`parent_agent_session_id` 归属到顶层会话和直接父会话。用于本地匹配的任务路径不会上传。
 
 ## 连续性规则
 

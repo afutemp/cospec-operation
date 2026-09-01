@@ -13,6 +13,11 @@ export interface FileState {
   observedFileIdentity: string;
   pendingUpload: ChunkMetadata | null;
   lastDiagnostic: { code: "source_truncated" | "source_rotated"; observedAt: string } | null;
+  cospecRunId?: string;
+  sessionRole?: "main" | "subagent";
+  rootAgentSessionId?: string;
+  parentAgentSessionId?: string | null;
+  collectionEndOffset?: number | null;
 }
 
 export interface RunBinding {
@@ -68,6 +73,11 @@ export interface ChunkMetadata {
   agent_session_id: string;
   collected_at: string;
   collector_version: string;
+  session?: {
+    role: "main" | "subagent";
+    root_agent_session_id: string;
+    parent_agent_session_id: string | null;
+  };
   file: {
     source_file_id: string; generation: number; path_hint: string;
     start_offset: number; end_offset: number; byte_count: number; line_count: number;

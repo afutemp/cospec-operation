@@ -50,7 +50,8 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Server> 
     try {
       const state = await store.load();
       const resolved = await registry.resolvePending(state);
-      if (resolved > 0) await store.save(state);
+      const discovered = await registry.discoverSubagents(state);
+      if (resolved > 0 || discovered > 0) await store.save(state);
       const result = await scanner.scan();
       const current = await store.load();
       const diagnostics = ensureDiagnostics(current);

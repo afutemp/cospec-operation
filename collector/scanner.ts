@@ -50,7 +50,8 @@ export class CollectorScanner {
           await this.store.save(state);
         }
         while (true) {
-          const maximumEnd = run.status === "open" ? undefined : run.endOffset ?? undefined;
+          const maximumEnd = run.status === "open" ? undefined
+            : file.cospecRunId ? file.collectionEndOffset ?? undefined : run.endOffset ?? undefined;
           if (maximumEnd !== undefined && file.confirmedOffset >= maximumEnd) break;
           const chunk = await readNextChunk(file.canonicalPath, file.confirmedOffset, maximumEnd);
           if (!chunk) break;
@@ -94,6 +95,10 @@ function metadataFor(file: FileState, run: RunBinding, chunk: Awaited<ReturnType
     source_type: agentType === "claude_code" ? "claude_code_jsonl" : "codex_jsonl",
     source_version: file.sourceVersion, agent_session_id: file.agentSessionId,
     collected_at: now, collector_version: "0.1.0",
+    session: {
+      role: file.sessionRole ?? "main", root_agent_session_id: file.rootAgentSessionId ?? run.agentSessionId,
+      parent_agent_session_id: file.parentAgentSessionId ?? null,
+    },
     file: {
       source_file_id: file.sourceFileId, generation: file.generation,
       path_hint: basename(file.canonicalPath), start_offset: chunk.startOffset,
@@ -110,6 +115,12 @@ function metadataFor(file: FileState, run: RunBinding, chunk: Awaited<ReturnType
 }
 
 function collectibleRun(state: CollectorState, file: FileState): RunBinding | undefined {
+  if (file.cospecRunId) {
+    const run = state.runs[file.cospecRunId];
+    if (!run) return undefined;
+    if (run.status === "open") return run;
+    return file.collectionEndOffset !== null && file.collectionEndOffset !== undefined && file.confirmedOffset < file.collectionEndOffset ? run : undefined;
+  }
   return Object.values(state.runs).find((run) => {
     if (run.sourceFileId !== file.sourceFileId) return false;
     if (run.status === "open") return true;

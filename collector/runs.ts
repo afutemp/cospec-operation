@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { stat } from "node:fs/promises";
 import type { AgentType, CollectorState, RunBinding } from "./types.js";
-import { locateClaudeCodeSession, locateCodexSession, type LocatedSession } from "./session.js";
+import { lastCompleteLineOffset, locateClaudeCodeSession, locateCodexSession, locateSubagents, type LocatedSession } from "./session.js";
 
 export class RunRegistry {
   private readonly roots: Record<AgentType, string>;
@@ -31,7 +32,9 @@ export class RunRegistry {
         sourceVersion: located.sourceVersion,
         generation: 1, confirmedOffset: 0, previousChunkSha256: null,
         observedFileIdentity: located.identity, pendingUpload: null, lastDiagnostic: null,
+        sessionRole: "main", rootAgentSessionId: sessionId, parentAgentSessionId: null,
       };
+      file.sessionRole ??= "main"; file.rootAgentSessionId ??= sessionId; file.parentAgentSessionId ??= null;
       state.files[located.path] = file;
       file.confirmedOffset = located.completeOffset;
       file.previousChunkSha256 = null;
@@ -56,7 +59,9 @@ export class RunRegistry {
         agentSessionId: binding.agentSessionId, sourceVersion: located.sourceVersion,
         generation: 1, confirmedOffset: 0, previousChunkSha256: null,
         observedFileIdentity: located.identity, pendingUpload: null, lastDiagnostic: null,
+        sessionRole: "main", rootAgentSessionId: binding.agentSessionId, parentAgentSessionId: null,
       };
+      file.sessionRole ??= "main"; file.rootAgentSessionId ??= binding.agentSessionId; file.parentAgentSessionId ??= null;
       state.files[located.path] = file;
       file.confirmedOffset = located.completeOffset;
       file.previousChunkSha256 = null;
@@ -77,10 +82,48 @@ export class RunRegistry {
     if (binding.status !== "open") throw new Error("run_finish_conflict");
     const located = await this.locate(binding.agentType, binding.agentSessionId);
     if (!located || !binding.sourceFileId) throw new Error("session_file_not_found");
+    await this.discoverSubagentsForRun(state, binding, located);
     binding.endOffset = located.completeOffset;
+    for (const file of Object.values(state.files)) if (file.cospecRunId === runId && file.sessionRole === "subagent") {
+      file.collectionEndOffset = await lastCompleteLineOffset(file.canonicalPath, Number((await stat(file.canonicalPath)).size));
+    }
     binding.endedAt = new Date().toISOString();
     binding.status = status;
     return binding;
+  }
+
+  async discoverSubagents(state: CollectorState): Promise<number> {
+    let discovered = 0;
+    for (const binding of Object.values(state.runs)) {
+      if (binding.status !== "open" || binding.startOffset === null) continue;
+      const main = await this.locate(binding.agentType, binding.agentSessionId); if (!main) continue;
+      discovered += await this.discoverSubagentsForRun(state, binding, main);
+    }
+    return discovered;
+  }
+
+  private async discoverSubagentsForRun(state: CollectorState, binding: RunBinding, main: LocatedSession): Promise<number> {
+    if (binding.startOffset === null) return 0;
+    const children = await locateSubagents(binding.agentType, this.roots[binding.agentType], binding.agentSessionId,
+      main.path, binding.startOffset, binding.endOffset ?? main.completeOffset);
+    let discovered = 0;
+    for (const child of children) {
+      const existing = state.files[child.path];
+      if (existing) {
+        if (existing.cospecRunId && existing.cospecRunId !== binding.cospecRunId) throw new Error("subagent_run_conflict");
+        continue;
+      }
+      state.files[child.path] = {
+        sourceFileId: randomUUID(), canonicalPath: child.path, agentType: binding.agentType,
+        agentSessionId: child.agentSessionId, sourceVersion: child.sourceVersion,
+        generation: 1, confirmedOffset: 0, previousChunkSha256: null, observedFileIdentity: child.identity,
+        pendingUpload: null, lastDiagnostic: null, cospecRunId: binding.cospecRunId, sessionRole: "subagent",
+        rootAgentSessionId: binding.agentSessionId, parentAgentSessionId: child.parentAgentSessionId,
+        collectionEndOffset: binding.status === "open" ? null : child.completeOffset,
+      };
+      discovered += 1;
+    }
+    return discovered;
   }
 
   private locate(agentType: AgentType, sessionId: string): Promise<LocatedSession | null> {

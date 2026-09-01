@@ -204,6 +204,42 @@ test("Run tool durations merge concurrent time and reject reversed intervals", a
   repository.close();
 });
 
+test("Run facts keep subagent parent relation and summarize child resources", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cospec-subagent-facts-"));
+  const runId = randomUUID(); const rootSessionId = randomUUID(); const childSessionId = randomUUID();
+  const mainBytes = Buffer.from(`${JSON.stringify({ type: "response_item", timestamp: "2026-09-01T01:00:00Z",
+    payload: { type: "message", role: "user", content: "private" } })}\n`);
+  const main = metadata(mainBytes, runId, 0, null, randomUUID());
+  main.agent_session_id = rootSessionId;
+  main.session = { role: "main", root_agent_session_id: rootSessionId, parent_agent_session_id: null };
+  const childBytes = Buffer.from([
+    JSON.stringify({ type: "response_item", timestamp: "2026-09-01T01:00:01Z", payload: { type: "message", role: "assistant", content: "private" } }),
+    JSON.stringify({ type: "event_msg", timestamp: "2026-09-01T01:00:02Z", payload: { type: "token_count", info: {
+      last_token_usage: { input_tokens: 12, output_tokens: 3 } } } }),
+    JSON.stringify({ type: "response_item", timestamp: "2026-09-01T01:00:03Z", payload: { type: "function_call", call_id: "child-call", name: "exec" } }),
+    JSON.stringify({ type: "response_item", timestamp: "2026-09-01T01:00:04Z", payload: { type: "function_call_output", call_id: "child-call", output: "{}" } }),
+  ].join("\n") + "\n");
+  const child = metadata(childBytes, runId, 0, null, randomUUID());
+  child.agent_session_id = childSessionId;
+  child.session = { role: "subagent", root_agent_session_id: rootSessionId, parent_agent_session_id: rootSessionId };
+  const repository = await DurableChunkRepository.open(root);
+  await repository.accept(main, mainBytes); await repository.accept(child, childBytes);
+  await new ParserWorker(repository).runPending();
+  assert.equal(repository.getRun(runId)?.agentSessionId, rootSessionId);
+  const subagents = (repository.getRunFacts(runId) as { subagents: Record<string, any> }).subagents;
+  assert.equal(subagents.count, 1);
+  assert.equal(subagents.parsed_sessions, 1);
+  assert.equal(subagents.max_depth, 1);
+  assert.equal(subagents.messages.total, 1);
+  assert.equal(subagents.tokens.input_tokens, 12);
+  assert.equal(subagents.tools.calls, 1);
+  assert.equal(subagents.tools.duration.wall_clock_ms, 1000);
+  assert.equal(subagents.sessions[0].agentSessionId, childSessionId);
+  assert.equal(subagents.sessions[0].parentAgentSessionId, rootSessionId);
+  assert.equal(JSON.stringify(subagents).includes("private"), false);
+  repository.close();
+});
+
 function metadata(bytes: Buffer, runId = randomUUID(), startOffset = 100, previousHash: string | null = null, sourceFileId = randomUUID()): ChunkMetadata {
   const now = new Date().toISOString();
   return {

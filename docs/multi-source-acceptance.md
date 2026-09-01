@@ -2,7 +2,7 @@
 
 ## 绑定模型
 
-一个 Cospec Run 只关联一个 Agent Session 和一个 JSONL 来源。同一用户级 Collector daemon 可以同时维护多个独立 Run，包括 Codex Run 和 Claude Code Run。当前不支持一个 Run 聚合多个 Session。
+一个 Cospec Run 只绑定一个顶层 Agent Session；该 Session 在 Run 边界内显式创建的子代理 JSONL 可以作为独立来源归属同一 Run。主会话和每个子代理保持独立文件 ID、游标和 hash 链。同一用户级 Collector daemon 可以同时维护多个独立 Run，包括 Codex Run 和 Claude Code Run。
 
 ## 自动化验收
 

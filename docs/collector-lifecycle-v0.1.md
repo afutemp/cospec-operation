@@ -39,6 +39,8 @@ cospec-telemetry finish --run-id "$COSPEC_RUN_ID" --status completed
 
 `finish` 将当时已落盘的最后一个完整 JSONL 行末 byte offset 记为结束边界，状态允许 `completed` 或 `failed`。重复提交相同结果按幂等成功；冲突结果必须报错，不静默覆盖。
 
+如果 Run 在主会话边界内创建了具有显式关联 ID 的子代理，daemon 会为每个子代理建立独立文件游标，并在 `finish` 时分别冻结其完整行结束位置。子代理不会改变顶层 Run 绑定的 `agent_session_id`。
+
 Collector 在返回 `finish` 前补传截至结束边界的完整行；达到该边界后不再采集此 Run。后续普通对话不会上传，除非新的 `ensure` 建立另一个 Run。
 
 未调用 `finish` 的 Run 保持 `open`。下次路由可使用同一 Run ID 恢复，或者显式以 `interrupted` 结束；不得仅凭超时猜测业务结果。

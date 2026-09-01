@@ -42,6 +42,8 @@ GET /api/v1/runs/:runId/facts
 
 返回活动解析器版本的消息、Token、工具调用/结果和宿主记录时间跨度。工具状态包含明确成功、明确失败、不可判定、可判定数量和 `status_coverage`；明确失败是下界，不能脱离覆盖率解释。工具耗时包含可计算数量、覆盖率、通常耗时、累计使用量和去除并发重叠后的实际经过时间。字段与指标边界见 [宿主资源与工具事实 0.2](host-resource-facts-v0.2.md)。
 
+新版 Collector 上传子代理关联后，响应中的 `subagents` 还会返回子代理数量、已解析数量、最大层级、消息、Token、工具和模型汇总，以及不含正文和任务名的父子会话列表。详细规则见 [Codex 与 Claude Code 子代理采集](subagent-collection.md)。
+
 ## 数据边界
 
 API 不返回消息正文、工具参数、工具输出、原始 JSONL、`path_hint` 或服务端绝对路径。本阶段不提供 HTML 页面；使用接口测试、curl 或其他 HTTP 客户端验证。

@@ -8,7 +8,7 @@
 - `agent_type` 仅允许 `codex` 或 `claude_code`；
 - 同一 Collector 可并行维护多个不同 Run；
 - 同一 Agent Session 同一时间只允许一个 `pending/open` Run；
-- 不支持一个 Run 聚合多个 Session 或来源。
+- 一个 Run 只绑定一个顶层 Session；该 Session 在 Run 边界内通过显式 ID 创建的子代理属于同一 Run，并作为独立 JSONL 来源上传。不支持无显式关联的任意 Session 聚合。
 
 ## 开始或恢复
 
