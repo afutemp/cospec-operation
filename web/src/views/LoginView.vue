@@ -13,4 +13,4 @@ async function login() {
   finally { loading.value = false; }
 }
 </script>
-<template><main class="login-page"><section class="login-card"><div class="brand-mark">C</div><h1>Cospec 运营看板</h1><p>请输入服务端访问 Token。Token 只保存在当前页面内存中，刷新或关闭页面后需要重新输入。</p><el-input v-model="token" type="password" show-password size="large" placeholder="Bearer Token" @keyup.enter="login" /><el-button type="primary" size="large" :loading="loading" :disabled="!token.trim()" @click="login">进入看板</el-button></section></main></template>
+<template><main class="login-page"><section class="login-card"><div class="brand-mark">C</div><h1>Cospec 运营看板</h1><p>请输入服务端访问 Token。Token 只在当前标签页会话中保存，刷新后仍然有效；关闭标签页后清除。</p><el-input v-model="token" type="password" show-password size="large" placeholder="Bearer Token" @keyup.enter="login" /><el-button type="primary" size="large" :loading="loading" :disabled="!token.trim()" @click="login">进入看板</el-button></section></main></template>

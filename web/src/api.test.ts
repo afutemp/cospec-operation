@@ -5,8 +5,9 @@ import { ApiError, telemetryQueries } from "./api";
 afterEach(() => { vi.unstubAllGlobals(); auth.clear(); });
 
 describe("telemetryQueries", () => {
-  it("sends the in-memory bearer token and maps JSON", async () => {
+  it("keeps the tab-scoped bearer token and maps JSON", async () => {
     auth.set("test-token");
+    expect(sessionStorage.getItem("cospec_telemetry_token")).toBe("test-token");
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ items: [], total: 0, limit: 20, offset: 0 }) });
     vi.stubGlobal("fetch", fetchMock);
     await expect(telemetryQueries.listRuns(20, 0)).resolves.toMatchObject({ total: 0 });
@@ -18,5 +19,6 @@ describe("telemetryQueries", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({ error: "unauthorized" }) }));
     await expect(telemetryQueries.getRunUsage({})).rejects.toEqual(new ApiError(401, "unauthorized"));
     expect(auth.authenticated()).toBe(false);
+    expect(sessionStorage.getItem("cospec_telemetry_token")).toBeNull();
   });
 });

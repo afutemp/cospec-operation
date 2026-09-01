@@ -6,6 +6,8 @@ test("operator can authenticate, inspect overview and open a Run", async ({ page
   await page.getByRole("button", { name: "进入看板" }).click();
   await expect(page.getByRole("heading", { name: "运营总览" })).toBeVisible();
   await expect(page.getByText("输入 Token", { exact: true }).locator("..").getByText("120", { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "运营总览" })).toBeVisible();
   await page.locator(".filters .el-select").first().click();
   await page.getByRole("option", { name: "今天", exact: true }).click();
   await expect(page.locator(".filters .el-select").first().getByText("今天", { exact: true })).toBeVisible();

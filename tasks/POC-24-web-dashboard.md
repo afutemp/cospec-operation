@@ -4,7 +4,7 @@
 
 - [x] 冻结 Vue 3、TypeScript、Vite、Element Plus、ECharts 和 Vue Query 技术栈；
 - [x] 建立统一数据访问模块，页面不重复处理鉴权和错误响应；
-- [x] Token 仅保存在当前标签页内存；
+- [x] Token 保存在当前标签页的 `sessionStorage`，刷新保持登录、关闭标签页后清除；正式版本由 SSO 替换；
 - [x] 实现运营总览及时间、Agent、版本和模型筛选；
 - [x] 时间筛选提供常用快捷范围，自定义日期只作为兜底；
 - [x] 区分无效 Token 和服务端不可用，并为局域网 HTTP 提供复制降级；
