@@ -27,6 +27,13 @@ test("health endpoints expose only process and repository readiness", async () =
     assert.deepEqual(ready.json(), { status: "ready" });
     assert.equal(live.body.includes(TOKEN) || live.body.includes(root), false);
     assert.equal(ready.body.includes(TOKEN) || ready.body.includes(root), false);
+    const page = await app.inject({ method: "GET", url: "/" });
+    assert.equal(page.statusCode, 200);
+    assert.match(page.headers["content-type"] ?? "", /text\/html/);
+    assert.match(page.body, /Cospec/);
+    const routeFallback = await app.inject({ method: "GET", url: "/runs/example" });
+    assert.match(routeFallback.headers["content-type"] ?? "", /text\/html/);
+    assert.deepEqual((await app.inject({ method: "GET", url: "/api/v1/not-found" })).json(), { error: "not_found" });
   } finally { await app.close(); repository.close(); }
 });
 

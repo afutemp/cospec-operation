@@ -14,7 +14,7 @@
 - [x] Claude Code JSONL 没有上限字段时返回不可得，不按模型名称猜测；
 - [x] Run 事实接口返回压缩总数、触发方式分布和上下文上限可得性；
 - [x] 自动化测试覆盖 Codex、Claude Code 和重复计数边界；
-- [ ] Claude Code 状态行 `context_window.context_window_size` 的采集通道（不属于原始 JSONL 解析，后续单独接入）。
+- [x] 经决策不接入 Claude Code 状态行：避免修改用户 `settings.json` 和占用唯一的 `statusLine` 配置；上限保持不可得。
 
 ## 查询口径
 

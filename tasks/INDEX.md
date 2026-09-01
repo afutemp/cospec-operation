@@ -25,6 +25,7 @@
 | POC-20 | [统计 Run 时长与资源分布](POC-20-run-resource-distribution.md) | 已完成 |
 | POC-21 | [采集并统计 Codex/Claude Code 子代理](POC-21-subagent-collection.md) | 当前环境通过（Windows 待验证） |
 | POC-22 | [汇总子代理使用与资源分布](POC-22-subagent-usage-summary.md) | 已完成 |
-| POC-23 | [统计上下文压缩次数与可得的上下文上限](POC-23-context-compaction.md) | JSONL 部分已完成（Claude Code 上限采集待接入） |
+| POC-23 | [统计上下文压缩次数与可得的上下文上限](POC-23-context-compaction.md) | 已完成（Claude Code 上限按决策保持不可得） |
+| POC-24 | [搭建 Web 运营看板并与服务端联调](POC-24-web-dashboard.md) | 当前环境通过（Windows 待验证） |
 
-`POC-01/01A` 已冻结，`POC-02/03/04/05/06/07/09/10/11/13/14/15/16/17/18/19/20/22` 已完成；`POC-23` 已完成原始 JSONL 范围，Claude Code 上下文上限需要状态行采集通道；`POC-08/12/21` 当前 Linux 环境验收通过，Windows 实机项保持待验证。协议见 [upload-protocol-v0.1.md](../docs/upload-protocol-v0.1.md)、[collector-lifecycle-v0.1.md](../docs/collector-lifecycle-v0.1.md) 和 [Collector 调用契约 0.1](../docs/collector-integration-contract-v0.1.md)。JSON Schema 位于 `contracts/`。
+`POC-01/01A` 已冻结，`POC-02/03/04/05/06/07/09/10/11/13/14/15/16/17/18/19/20/22/23` 已完成；`POC-08/12/21/24` 当前 Linux 环境验收通过，Windows 实机项保持待验证。协议见 [upload-protocol-v0.1.md](../docs/upload-protocol-v0.1.md)、[collector-lifecycle-v0.1.md](../docs/collector-lifecycle-v0.1.md) 和 [Collector 调用契约 0.1](../docs/collector-integration-contract-v0.1.md)。JSON Schema 位于 `contracts/`。

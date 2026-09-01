@@ -3,7 +3,9 @@ import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
 import Fastify, { type FastifyInstance } from "fastify";
 import multipart from "@fastify/multipart";
+import fastifyStatic from "@fastify/static";
 import { Ajv2020 } from "ajv/dist/2020.js";
+import { fileURLToPath } from "node:url";
 import type { ChunkMetadata } from "../collector/types.js";
 import { MemoryChunkRepository, RepositoryConflict, type ChunkRepository } from "./memory-repository.js";
 import type { QueryRepository, RunUsageFilters } from "./query.js";
@@ -23,6 +25,7 @@ export async function createIngestApp(options: IngestOptions): Promise<FastifyIn
   addFormats(ajv);
   const validate = ajv.compile(schema);
   await app.register(multipart, { limits: { files: 1, fields: 1, fileSize: MAX_CHUNK_BYTES } });
+  await app.register(fastifyStatic, { root: fileURLToPath(new URL("../web", import.meta.url)), wildcard: false });
 
   app.get("/health/live", async () => ({ status: "ok" }));
 
@@ -126,6 +129,10 @@ export async function createIngestApp(options: IngestOptions): Promise<FastifyIn
       return reply.send(queryRepository.getRunUsageSummary(query as RunUsageFilters));
     });
   }
+  app.setNotFoundHandler((request, reply) => {
+    if (request.method === "GET" && !request.url.startsWith("/api/") && !request.url.startsWith("/health/")) return reply.sendFile("index.html");
+    return reply.code(404).send({ error: "not_found" });
+  });
   return app;
 }
 

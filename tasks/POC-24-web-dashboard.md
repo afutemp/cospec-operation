@@ -1,0 +1,15 @@
+# POC-24 Web 运营看板与服务端联调
+
+## 验收项
+
+- [x] 冻结 Vue 3、TypeScript、Vite、Element Plus、ECharts 和 Vue Query 技术栈；
+- [x] 建立统一数据访问模块，页面不重复处理鉴权和错误响应；
+- [x] Token 仅保存在当前标签页内存；
+- [x] 实现运营总览及时间、Agent、版本和模型筛选；
+- [x] 实现分页 Run 列表；
+- [x] 实现 Run 概况、资源、上下文压缩、工具、子代理、数据块和重放详情；
+- [x] 缺失值不补零，明确失败与状态覆盖率共同展示；
+- [x] Fastify 同源托管前端并支持前端路由刷新；
+- [x] Vitest 覆盖鉴权请求和人话格式化；
+- [x] Playwright Chromium 走通登录、总览、列表和详情；
+- [ ] Windows 浏览器实机验收。

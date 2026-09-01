@@ -22,6 +22,7 @@ Cospec 原始遥测数据端到端链路 PoC。
 - 第一版即支持 offset 游标、增量块、失败续传、截断和轮转诊断；
 - 第一版解析：JSON 行合法性、记录类型、时间范围和诊断；
 - 当前提供 Run 级重放和只读查询 API。
+- 当前提供与服务端同源运行的运营总览、Run 列表和 Run 详情页面。
 
 ## 当前不做
 
@@ -52,6 +53,7 @@ Cospec 原始遥测数据端到端链路 PoC。
 - [服务端持久存储](docs/durable-storage.md)
 - [Codex JSONL 最小解析器](docs/minimal-parser.md)
 - [Run 级解析重放](docs/run-replay.md)
+- [Web 运营看板](docs/web-dashboard.md)
 - [只读查询 API](docs/query-api.md)
 - [Linux 真实端到端验收记录](docs/e2e-linux-2026-09-01.md)
 - [Linux HTTP 故障恢复验收记录](docs/e2e-http-outage-recovery-2026-09-01.md)

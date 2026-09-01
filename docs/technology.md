@@ -12,8 +12,9 @@
 - 原始数据块：本地文件系统，通过存储接口隔离；
 - 解析任务：服务端进程内任务；
 - 测试：Node.js test runner；
-- Web：到 POC-07 再根据真实交互决定，不在当前初始化前端工程。
+- Web：Vue 3、TypeScript、Vite、Vue Router、Element Plus、ECharts 和 Vue Query；由 Fastify 同源托管构建产物；
+- Web 测试：Vitest、Vue Test Utils 和固定在项目中的 Playwright Chromium 验收。
 
-PoC 不引入 PostgreSQL、对象存储、Redis、消息队列或前端框架。替换这些实现时不得改变已冻结的上传协议语义。
+PoC 不引入 PostgreSQL、对象存储、Redis 或消息队列。替换这些实现时不得改变已冻结的上传协议语义。
 
 Collector 优先直接使用 Node.js 的跨平台 API，共用一套实现。IPC 不使用 TCP 或第三方库，只有 `node:net` 的 endpoint 字符串按平台生成。状态目录及经测试确认存在差异的行为收敛为少量辅助函数，不建立独立的平台适配层。
