@@ -104,7 +104,10 @@ test("worker persists versioned facts and exposes Run-level metric inputs", asyn
   const root = await mkdtemp(join(tmpdir(), "cospec-parser-facts-"));
   const bytes = Buffer.from([
     JSON.stringify({ type: "assistant", timestamp: "2026-09-01T01:00:00Z", message: { role: "assistant", model: "claude-test",
-      usage: { input_tokens: 11, output_tokens: 4, cache_read_input_tokens: 3 }, content: [{ type: "tool_use", id: "tool-1", name: "Bash", input: "private" }] } }),
+      usage: { input_tokens: 11, output_tokens: 4, cache_read_input_tokens: 3 }, content: [
+        { type: "tool_use", id: "tool-1", name: "Bash", input: "private" },
+        { type: "tool_use", id: "tool-without-result", name: "Read", input: "private" },
+      ] } }),
     JSON.stringify({ type: "user", timestamp: "2026-09-01T01:00:01Z", message: { role: "user",
       content: [{ type: "tool_result", tool_use_id: "tool-1", is_error: false, content: "private" }] } }),
   ].join("\n") + "\n");
@@ -125,8 +128,11 @@ test("worker persists versioned facts and exposes Run-level metric inputs", asyn
   assert.equal(facts.tokens.input_tokens, 11);
   assert.equal(facts.tokens.cache_read_input_tokens, 3);
   assert.equal(facts.tokens.reported_total_tokens, null);
-  assert.deepEqual(facts.tools, { calls: 1, successes: 1, failures: 0, unknown_results: 0,
-    byTool: { Bash: { calls: 1, successes: 1, failures: 0, unknown_results: 0 } } });
+  assert.deepEqual(facts.tools, { calls: 2, successes: 1, failures: 0, determined_results: 1, unknown_results: 1, status_coverage: 0.5,
+    byTool: {
+      Bash: { calls: 1, successes: 1, failures: 0, unknown_results: 0, determined_results: 1, status_coverage: 1 },
+      Read: { calls: 1, successes: 0, failures: 0, unknown_results: 1, determined_results: 0, status_coverage: 0 },
+    } });
   assert.equal(facts.attribution.skill, "unavailable");
   assert.equal(facts.interval.semantics, "host_record_span");
   assert.equal(JSON.stringify(facts).includes("private"), false);
@@ -150,7 +156,7 @@ test("Run facts pair tool calls and direct failures across raw chunk boundaries"
   await repository.accept(second, secondBytes);
   await new ParserWorker(repository).runPending();
   const tools = (repository.getRunFacts(runId) as { tools: { byTool: Record<string, Record<string, number>> } }).tools;
-  assert.deepEqual(tools.byTool.Bash, { calls: 1, successes: 0, failures: 1, unknown_results: 0 });
+  assert.deepEqual(tools.byTool.Bash, { calls: 1, successes: 0, failures: 1, unknown_results: 0, determined_results: 1, status_coverage: 1 });
   assert.equal(JSON.stringify(repository.getRunFacts(runId)).includes("private"), false);
   repository.close();
 });

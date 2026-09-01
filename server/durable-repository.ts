@@ -277,11 +277,10 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
       COUNT(reasoning_output_tokens) AS reasoning_samples,SUM(reasoning_output_tokens) AS reasoning_output_tokens,
       COUNT(reported_total_tokens) AS reported_total_samples,SUM(reported_total_tokens) AS reported_total_tokens
       FROM token_usage_facts t JOIN chunks c ON c.upload_id=t.upload_id WHERE c.cospec_run_id=? AND t.parser_version=?`).get(...params) as Record<string, unknown>;
-    const tools = this.database.prepare(`SELECT
+    const toolCounts = numericObject(this.database.prepare(`SELECT
       (SELECT COUNT(*) FROM tool_call_facts f JOIN chunks c ON c.upload_id=f.upload_id WHERE c.cospec_run_id=? AND f.parser_version=?) AS calls,
       (SELECT COUNT(*) FROM tool_result_facts f JOIN chunks c ON c.upload_id=f.upload_id WHERE c.cospec_run_id=? AND f.parser_version=? AND f.status='success') AS successes,
-      (SELECT COUNT(*) FROM tool_result_facts f JOIN chunks c ON c.upload_id=f.upload_id WHERE c.cospec_run_id=? AND f.parser_version=? AND f.status='failure') AS failures,
-      (SELECT COUNT(*) FROM tool_result_facts f JOIN chunks c ON c.upload_id=f.upload_id WHERE c.cospec_run_id=? AND f.parser_version=? AND f.status='unknown') AS unknown_results`).get(runId, version, runId, version, runId, version, runId, version) as Record<string, unknown>;
+      (SELECT COUNT(*) FROM tool_result_facts f JOIN chunks c ON c.upload_id=f.upload_id WHERE c.cospec_run_id=? AND f.parser_version=? AND f.status='failure') AS failures`).get(runId, version, runId, version, runId, version) as Record<string, unknown>);
     const toolRows = this.database.prepare(`WITH calls AS (
         SELECT f.call_id,f.tool_name FROM tool_call_facts f JOIN chunks c ON c.upload_id=f.upload_id WHERE c.cospec_run_id=? AND f.parser_version=?
       ), results AS (
@@ -301,9 +300,9 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
       parserVersion: version,
       messages: { total: messageRows.reduce((sum, row) => sum + Number(row.count), 0), byRole: Object.fromEntries(messageRows.map((row) => [String(row.role), Number(row.count)])) },
       tokens: { ...numericObject(token), byModel: Object.fromEntries(modelRows.map((row) => [String(row.model), Number(row.observations)])) },
-      tools: { ...numericObject(tools), byTool: Object.fromEntries(toolRows.map((row) => {
+      tools: { ...toolStatusMetrics(toolCounts), byTool: Object.fromEntries(toolRows.map((row) => {
         const { tool_name: _toolName, ...counts } = row;
-        return [String(row.tool_name), numericObject(counts)];
+        return [String(row.tool_name), toolStatusMetrics(numericObject(counts))];
       })) },
       interval: { firstEventAt: time.first_event_at ?? null, lastEventAt: time.last_event_at ?? null, semantics: "host_record_span" },
       attribution: { run: "explicit_jsonl_offset_interval", skill: "unavailable" },
@@ -431,6 +430,19 @@ function toRunListItem(row: Record<string, unknown>): RunListItem {
 
 function numericObject(row: Record<string, unknown>): Record<string, number | null> {
   return Object.fromEntries(Object.entries(row).map(([key, value]) => [key, value === null ? null : Number(value)]));
+}
+
+function toolStatusMetrics(counts: Record<string, number | null>): Record<string, number | null> {
+  const calls = counts.calls ?? 0;
+  const successes = counts.successes ?? 0;
+  const failures = counts.failures ?? 0;
+  const determinedResults = successes + failures;
+  return {
+    ...counts,
+    determined_results: determinedResults,
+    unknown_results: Math.max(0, calls - determinedResults),
+    status_coverage: calls === 0 ? null : determinedResults / calls,
+  };
 }
 
 async function exists(path: string): Promise<boolean> {

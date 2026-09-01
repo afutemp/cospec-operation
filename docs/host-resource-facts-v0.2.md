@@ -28,6 +28,8 @@
 - Codex：结构化结果存在 `exit_code` 时，非零为 failure、零为 success；不存在则为 unknown；
 - 不根据正文中的 error、failed 或业务 status 文本推断失败。
 
+Codex 的 `exec_command` 内层结果通常具有 `exit_code`，但通过外层 `functions.exec` 编排时，调用代码可能只返回 `result.output`，使退出码不进入会话 JSONL。该信息无法在服务端补推。因此 Codex 工具状态属于**部分可得**，明确失败数只能作为实际失败数的下界，不能直接作为核心运营 KPI。
+
 不保存消息正文、thinking、工具参数、工具输出或错误正文。
 
 ## Run 事实查询
@@ -39,7 +41,13 @@ Authorization: Bearer <token>
 
 返回活动解析器版本下的消息角色分布、Token 分类及有效样本、模型 observation、工具结果及按工具分布，以及首末消息/工具时间。时间跨度固定标记为 `host_record_span`，Skill 归属固定为 `unavailable`。
 
-指标层计算工具失败占比时，分母只能使用 `successes + failures`，并同时展示 `unknown_results`；不能把 unknown 计为成功。
+查询同时返回：
+
+- `determined_results = successes + failures`；
+- `unknown_results = calls - determined_results`，包含显式 unknown 和没有可关联结果的调用；
+- `status_coverage = determined_results / calls`，无调用时为 `null`。
+
+若展示可判定样本内的失败占比，分母只能使用 `determined_results`，并且必须同时展示 `status_coverage`。覆盖率不足或跨版本不稳定时，不发布统一“工具成功率/失败率”；`failures` 只能命名为“明确失败次数（下界）”。
 
 ## 当前限制
 
@@ -48,12 +56,14 @@ Authorization: Bearer <token>
 - 没有 Stage/Skill 边界，因此不生成 Skill 资源指标；
 - 没有用户确认事件，因此不计算用户等待时长；
 - 模型分布来自具有 usage 的记录，不代表每条消息都有模型字段。
+- Codex 是否保留 `exit_code` 受外层工具编排方式影响，不同会话之间的状态覆盖率不可假定一致。
 
 ## 真实样本只读验证
 
 2026-09-01 使用此前授权的样本做结构化离线验证，只输出计数：
 
 - Codex 0.150.1：1,451 行、178 条消息、198 个 Token observation、169 个工具调用和 169 个结果；指定样本的结果均缺少可识别的结构化 `exit_code`，因此 169 个全部保持 unknown，未误判为成功；
+- 补充扫描本机 Codex sessions：41 个文件共发现 218 条结构化退出码，其中 171 条为 0、47 条为非零；它们位于 `custom_tool_call_output.payload.output[].text` 的二次 JSON 中。该结果证明退出码部分可得，也证明单一会话的覆盖率不能代表整体；
 - Claude Code 2.1.220：2,375 行、1,354 条消息、835 个 Token observation、433 个工具调用和 433 个结果；结果为 98 success、12 failure、323 unknown，与原验证报告中 110 个显式 `is_error`、其中 12 个 true 完全一致；
 - 两个宿主的调用/结果数量均一一对应；验证过程未输出或复制正文、工具参数和工具结果；
 - 自动化测试另验证了调用与结果跨原始块时，仍能在 Run 查询中按 call ID 形成正确的按工具失败统计。
