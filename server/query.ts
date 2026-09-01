@@ -11,10 +11,15 @@ export interface RunDetail extends RunListItem {
   firstTimestamp: string | null; lastTimestamp: string | null;
 }
 
+export interface RunUsageFilters {
+  from?: string; to?: string; agentType?: "codex" | "claude_code"; agentVersion?: string; model?: string;
+}
+
 export interface QueryRepository {
   listRuns(limit: number, offset: number): { items: RunListItem[]; total: number };
   getRun(runId: string): RunDetail | null;
   getRunChunks(runId: string): Promise<Array<Record<string, unknown>>>;
   getRunReplays(runId: string): Array<Record<string, unknown>>;
   getRunFacts(runId: string): Record<string, unknown> | null;
+  getRunUsageSummary(filters: RunUsageFilters): Record<string, unknown>;
 }

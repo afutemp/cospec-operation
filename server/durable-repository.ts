@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { ChunkMetadata } from "../collector/types.js";
 import { RepositoryConflict, type AcceptedResult, type ChunkRepository } from "./memory-repository.js";
 import type { ParseResult } from "./parser.js";
-import type { QueryRepository, RunDetail, RunListItem } from "./query.js";
+import type { QueryRepository, RunDetail, RunListItem, RunUsageFilters } from "./query.js";
 
 interface StreamRow { next_offset: number; previous_hash: string }
 interface ChunkRow { fingerprint: string; end_offset: number; sha256: string }
@@ -317,6 +317,96 @@ export class DurableChunkRepository implements ChunkRepository, QueryRepository 
     };
   }
 
+  getRunUsageSummary(filters: RunUsageFilters): Record<string, unknown> {
+    const runRows = this.database.prepare(`SELECT c.cospec_run_id,
+      MIN(json_extract(c.metadata_json,'$.environment.agent_type')) AS agent_type,
+      MIN(json_extract(c.metadata_json,'$.environment.agent_version')) AS agent_version,
+      MIN(c.received_at) AS first_received_at,a.parser_version,
+      MIN(CASE WHEN p.parser_version=a.parser_version THEN p.first_timestamp END) AS first_event_at
+      FROM chunks c LEFT JOIN active_parser_versions a ON a.cospec_run_id=c.cospec_run_id
+      LEFT JOIN parse_results p ON p.upload_id=c.upload_id
+      GROUP BY c.cospec_run_id`).all() as Array<Record<string, unknown>>;
+    const messageRows = this.database.prepare(`SELECT c.cospec_run_id,m.parser_version,m.role,COUNT(*) AS count
+      FROM message_facts m JOIN chunks c ON c.upload_id=m.upload_id
+      JOIN active_parser_versions a ON a.cospec_run_id=c.cospec_run_id AND a.parser_version=m.parser_version
+      GROUP BY c.cospec_run_id,m.parser_version,m.role`).all() as Array<Record<string, unknown>>;
+    const tokenRows = this.database.prepare(`SELECT c.cospec_run_id,t.parser_version,t.model,COUNT(*) AS observations,
+      COUNT(t.input_tokens) AS input_samples,SUM(t.input_tokens) AS input_tokens,
+      COUNT(t.output_tokens) AS output_samples,SUM(t.output_tokens) AS output_tokens,
+      COUNT(t.cache_read_input_tokens) AS cache_read_samples,SUM(t.cache_read_input_tokens) AS cache_read_input_tokens,
+      COUNT(t.cache_write_or_creation_input_tokens) AS cache_write_samples,SUM(t.cache_write_or_creation_input_tokens) AS cache_write_or_creation_input_tokens,
+      COUNT(t.reasoning_output_tokens) AS reasoning_samples,SUM(t.reasoning_output_tokens) AS reasoning_output_tokens,
+      COUNT(t.reported_total_tokens) AS reported_total_samples,SUM(t.reported_total_tokens) AS reported_total_tokens
+      FROM token_usage_facts t JOIN chunks c ON c.upload_id=t.upload_id
+      JOIN active_parser_versions a ON a.cospec_run_id=c.cospec_run_id AND a.parser_version=t.parser_version
+      GROUP BY c.cospec_run_id,t.parser_version,t.model`).all() as Array<Record<string, unknown>>;
+
+    const modelsByRun = new Map<string, Set<string>>();
+    for (const row of tokenRows) if (row.model !== null) {
+      const models = modelsByRun.get(String(row.cospec_run_id)) ?? new Set<string>();
+      models.add(String(row.model)); modelsByRun.set(String(row.cospec_run_id), models);
+    }
+    const selected = runRows.filter((row) => {
+      const runId = String(row.cospec_run_id);
+      const time = Date.parse(String(row.first_event_at ?? row.first_received_at));
+      return (!filters.from || time >= Date.parse(filters.from)) && (!filters.to || time <= Date.parse(filters.to)) &&
+        (!filters.agentType || row.agent_type === filters.agentType) && (!filters.agentVersion || row.agent_version === filters.agentVersion) &&
+        (!filters.model || modelsByRun.get(runId)?.has(filters.model));
+    });
+    const runIds = new Set(selected.map((row) => String(row.cospec_run_id)));
+    const selectedMessages = messageRows.filter((row) => runIds.has(String(row.cospec_run_id)));
+    const selectedTokens = tokenRows.filter((row) => runIds.has(String(row.cospec_run_id)));
+
+    const byAgent: Record<string, number> = {};
+    const byAgentVersion: Record<string, number> = {};
+    const byDay: Record<string, number> = {};
+    let runsWithParser = 0;
+    for (const row of selected) {
+      increment(byAgent, String(row.agent_type));
+      increment(byAgentVersion, `${String(row.agent_type)}@${String(row.agent_version)}`);
+      increment(byDay, new Date(Date.parse(String(row.first_event_at ?? row.first_received_at))).toISOString().slice(0, 10));
+      if (row.parser_version !== null) runsWithParser += 1;
+    }
+    const messageByRole: Record<string, number> = {};
+    const messageRuns = new Set<string>();
+    let messageTotal = 0;
+    for (const row of selectedMessages) {
+      const count = Number(row.count); messageTotal += count; increment(messageByRole, String(row.role), count);
+      messageRuns.add(String(row.cospec_run_id));
+    }
+    const tokenRuns = new Set<string>();
+    const tokenFieldRuns = Object.fromEntries(TOKEN_TOTAL_FIELDS.map((field) => [field, new Set<string>()])) as Record<TokenTotalField, Set<string>>;
+    const modelRuns = new Set<string>();
+    const tokenTotals = emptyTokenTotals();
+    const byModel: Record<string, ReturnType<typeof emptyModelTotals>> = {};
+    for (const row of selectedTokens) {
+      const runId = String(row.cospec_run_id); tokenRuns.add(runId);
+      addTokenRow(tokenTotals, row);
+      for (const field of TOKEN_TOTAL_FIELDS) if (row[field] !== null) tokenFieldRuns[field].add(runId);
+      if (row.model !== null) {
+        modelRuns.add(runId);
+        const model = String(row.model); byModel[model] ??= emptyModelTotals();
+        addTokenRow(byModel[model], row); byModel[model].runs.add(runId);
+      }
+    }
+    return {
+      filters: { from: filters.from ?? null, to: filters.to ?? null, agentType: filters.agentType ?? null,
+        agentVersion: filters.agentVersion ?? null, model: filters.model ?? null },
+      timeSemantics: "first_jsonl_event_fallback_first_received",
+      runs: { total: selected.length, with_parser_facts: runsWithParser, without_parser_facts: selected.length - runsWithParser,
+        byAgent, byAgentVersion, byDay },
+      messages: coverageSummary(selected.length, messageRuns.size, { total: messageTotal, byRole: messageByRole,
+        average_per_observed_run: messageRuns.size ? messageTotal / messageRuns.size : null }),
+      tokens: coverageSummary(selected.length, tokenRuns.size, { ...tokenTotals,
+        average_input_per_observed_run: average(tokenTotals.input_tokens, tokenFieldRuns.input_tokens.size),
+        average_output_per_observed_run: average(tokenTotals.output_tokens, tokenFieldRuns.output_tokens.size),
+        field_run_coverage: Object.fromEntries(TOKEN_TOTAL_FIELDS.map((field) => [field,
+          coverageCounts(selected.length, tokenFieldRuns[field].size)])) }),
+      models: coverageSummary(selected.length, modelRuns.size, { byModel: Object.fromEntries(Object.entries(byModel).map(([model, totals]) =>
+        [model, { ...totals, runs: totals.runs.size }])) }),
+    };
+  }
+
   async orphanRawFiles(): Promise<string[]> {
     const registered = new Set(this.database.prepare("SELECT raw_path FROM chunks").all().map((row) => String(row.raw_path)));
     const rawRoot = join(this.root, "raw");
@@ -536,6 +626,42 @@ function mergedDuration(intervals: ToolInterval[]): number {
   }
   return total + (current ? current.end - current.start : 0);
 }
+
+const TOKEN_TOTAL_FIELDS = ["input_tokens", "output_tokens", "cache_read_input_tokens",
+  "cache_write_or_creation_input_tokens", "reasoning_output_tokens", "reported_total_tokens"] as const;
+const TOKEN_SAMPLE_FIELDS = ["input_samples", "output_samples", "cache_read_samples", "cache_write_samples",
+  "reasoning_samples", "reported_total_samples"] as const;
+type TokenTotalField = typeof TOKEN_TOTAL_FIELDS[number];
+type TokenSampleField = typeof TOKEN_SAMPLE_FIELDS[number];
+type TokenTotals = { observations: number } & Record<TokenTotalField, number | null> & Record<TokenSampleField, number>;
+type ModelTotals = TokenTotals & { runs: Set<string> };
+
+function emptyTokenTotals(): TokenTotals {
+  return { observations: 0, input_tokens: null, output_tokens: null, cache_read_input_tokens: null,
+    cache_write_or_creation_input_tokens: null, reasoning_output_tokens: null, reported_total_tokens: null,
+    input_samples: 0, output_samples: 0, cache_read_samples: 0, cache_write_samples: 0, reasoning_samples: 0, reported_total_samples: 0 };
+}
+
+function emptyModelTotals(): ModelTotals { return { ...emptyTokenTotals(), runs: new Set<string>() }; }
+
+function addTokenRow(target: TokenTotals, row: Record<string, unknown>): void {
+  target.observations += Number(row.observations);
+  for (const field of TOKEN_SAMPLE_FIELDS) target[field] += Number(row[field]);
+  for (const field of TOKEN_TOTAL_FIELDS) if (row[field] !== null) target[field] = (target[field] ?? 0) + Number(row[field]);
+}
+
+function coverageSummary(totalRuns: number, observedRuns: number, details: Record<string, unknown>): Record<string, unknown> {
+  return { ...details, ...coverageCounts(totalRuns, observedRuns) };
+}
+
+function coverageCounts(totalRuns: number, observedRuns: number): Record<string, number | null> {
+  return { runs_with_data: observedRuns, runs_missing_data: totalRuns - observedRuns,
+    run_coverage: totalRuns === 0 ? null : observedRuns / totalRuns };
+}
+
+function average(total: number | null, count: number): number | null { return total === null || count === 0 ? null : total / count; }
+
+function increment(target: Record<string, number>, key: string, amount = 1): void { target[key] = (target[key] ?? 0) + amount; }
 
 async function exists(path: string): Promise<boolean> {
   try { await access(path); return true; }

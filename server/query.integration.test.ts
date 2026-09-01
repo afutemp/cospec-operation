@@ -95,6 +95,62 @@ test("query API returns an empty paginated list", async () => {
   } finally { await app.close(); repository.close(); }
 });
 
+test("run usage summary reports coverage and supports agent, version, model and time filters", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cospec-run-usage-"));
+  const repository = await DurableChunkRepository.open(root);
+  const claudeRun = randomUUID();
+  const claudeBytes = Buffer.from(`${JSON.stringify({ type: "assistant", timestamp: "2026-08-30T01:00:00Z", message: {
+    role: "assistant", model: "claude-test", usage: { input_tokens: 10, output_tokens: 4, cache_read_input_tokens: 3 }, content: [] } })}\n`);
+  const claude = metadata(claudeBytes, claudeRun, randomUUID(), 0, null);
+  claude.source_type = "claude_code_jsonl"; claude.source_version = "2.1.220";
+  claude.environment.agent_type = "claude_code"; claude.environment.agent_version = "2.1.220";
+  await repository.accept(claude, claudeBytes);
+
+  const codexRun = randomUUID();
+  const codexBytes = Buffer.from(`${JSON.stringify({ type: "event_msg", timestamp: "2026-09-01T01:00:00Z", payload: {
+    type: "token_count", info: { last_token_usage: { input_tokens: 20, output_tokens: 5 } } } })}\n`);
+  const codex = metadata(codexBytes, codexRun, randomUUID(), 0, null);
+  await repository.accept(codex, codexBytes);
+
+  const missingRun = randomUUID();
+  const missingBytes = Buffer.from('{"type":"future_type"}\n');
+  await repository.accept(metadata(missingBytes, missingRun, randomUUID(), 0, null), missingBytes);
+  await new ParserWorker(repository).runPending();
+
+  const app = await createIngestApp({ bearerToken: TOKEN, repository, queryRepository: repository });
+  try {
+    const headers = { authorization: `Bearer ${TOKEN}` };
+    const response = await app.inject({ method: "GET", url: "/api/v1/summaries/run-usage", headers });
+    assert.equal(response.statusCode, 200);
+    const summary = response.json();
+    assert.equal(summary.runs.total, 3);
+    assert.deepEqual(summary.runs.byAgent, { claude_code: 1, codex: 2 });
+    assert.equal(summary.messages.total, 1);
+    assert.equal(summary.messages.runs_with_data, 1);
+    assert.equal(summary.messages.runs_missing_data, 2);
+    assert.equal(summary.tokens.input_tokens, 30);
+    assert.equal(summary.tokens.runs_with_data, 2);
+    assert.equal(summary.tokens.run_coverage, 2 / 3);
+    assert.deepEqual(summary.tokens.field_run_coverage.cache_read_input_tokens,
+      { runs_with_data: 1, runs_missing_data: 2, run_coverage: 1 / 3 });
+    assert.deepEqual(summary.models.byModel["claude-test"], { observations: 1,
+      input_samples: 1, output_samples: 1, cache_read_samples: 1, cache_write_samples: 0, reasoning_samples: 0, reported_total_samples: 0,
+      input_tokens: 10, output_tokens: 4,
+      cache_read_input_tokens: 3, cache_write_or_creation_input_tokens: null, reasoning_output_tokens: null,
+      reported_total_tokens: null, runs: 1 });
+    assert.equal(summary.models.runs_missing_data, 2);
+
+    const filtered = await app.inject({ method: "GET",
+      url: "/api/v1/summaries/run-usage?agentType=claude_code&agentVersion=2.1.220&model=claude-test&from=2026-08-30T00:00:00Z&to=2026-08-30T23:59:59Z", headers });
+    assert.equal(filtered.statusCode, 200);
+    assert.equal(filtered.json().runs.total, 1);
+    assert.deepEqual(filtered.json().runs.byAgent, { claude_code: 1 });
+    assert.equal((await app.inject({ method: "GET", url: "/api/v1/summaries/run-usage?agentType=other", headers })).statusCode, 400);
+    assert.equal((await app.inject({ method: "GET", url: "/api/v1/summaries/run-usage?unknown=x", headers })).statusCode, 400);
+    assert.equal((await app.inject({ method: "GET", url: "/api/v1/summaries/run-usage" })).statusCode, 401);
+  } finally { await app.close(); repository.close(); }
+});
+
 function metadata(bytes: Buffer, runId: string, sourceFileId: string, start: number, previous: string | null): ChunkMetadata {
   const now = new Date().toISOString();
   return {

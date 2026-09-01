@@ -45,3 +45,20 @@ GET /api/v1/runs/:runId/facts
 ## 数据边界
 
 API 不返回消息正文、工具参数、工具输出、原始 JSONL、`path_hint` 或服务端绝对路径。本阶段不提供 HTML 页面；使用接口测试、curl 或其他 HTTP 客户端验证。
+
+## Run 使用与资源汇总
+
+```http
+GET /api/v1/summaries/run-usage
+GET /api/v1/summaries/run-usage?from=2026-09-01T00:00:00Z&to=2026-09-01T23:59:59Z&agentType=codex
+```
+
+可选筛选条件为 `from`、`to`、`agentType`、`agentVersion` 和 `model`。接口返回：
+
+- Run 总数，以及按 Agent、Agent 版本和日期的分布；
+- 用户/Agent 消息数量；
+- 输入、输出、缓存读取、缓存写入、推理输出和宿主报告总量等 Token；
+- 按模型统计的 Run 数、记录数和 Token；
+- 消息、Token、模型分别有多少 Run 有数据、多少 Run 缺数据。
+
+时间筛选优先使用 JSONL 的首次事件时间；没有事件时间时使用服务端首次收到该 Run 数据的时间，响应中的 `timeSemantics` 固定说明该规则。消息只表示记录数量，不称为对话轮次。Token 平均值只除以该字段真实存在的 Run 数，缺失值不当作零；每种 Token 的有效 Run 数在 `field_run_coverage` 中单独返回。

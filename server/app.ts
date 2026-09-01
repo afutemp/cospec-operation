@@ -6,7 +6,7 @@ import multipart from "@fastify/multipart";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import type { ChunkMetadata } from "../collector/types.js";
 import { MemoryChunkRepository, RepositoryConflict, type ChunkRepository } from "./memory-repository.js";
-import type { QueryRepository } from "./query.js";
+import type { QueryRepository, RunUsageFilters } from "./query.js";
 
 const require = createRequire(import.meta.url);
 const addFormats = require("ajv-formats") as typeof import("ajv-formats").default;
@@ -111,6 +111,20 @@ export async function createIngestApp(options: IngestOptions): Promise<FastifyIn
       const result = queryRepository.getRunFacts(runId);
       return result ? reply.send(result) : reply.code(404).send({ error: "run_not_found" });
     });
+
+    app.get("/api/v1/summaries/run-usage", async (request, reply) => {
+      if (!authorized(request.headers.authorization, options.bearerToken)) return reply.code(401).send({ error: "unauthorized" });
+      const query = request.query as Record<string, string | undefined>;
+      const allowed = new Set(["from", "to", "agentType", "agentVersion", "model"]);
+      if (Object.keys(query).some((key) => !allowed.has(key))) return reply.code(400).send({ error: "invalid_filter" });
+      if ((query.from && !validDate(query.from)) || (query.to && !validDate(query.to)) ||
+          (query.from && query.to && Date.parse(query.from) > Date.parse(query.to)) ||
+          (query.agentType && !["codex", "claude_code"].includes(query.agentType)) ||
+          [query.agentVersion, query.model].some((value) => value !== undefined && (value.length === 0 || value.length > 200))) {
+        return reply.code(400).send({ error: "invalid_filter" });
+      }
+      return reply.send(queryRepository.getRunUsageSummary(query as RunUsageFilters));
+    });
   }
   return app;
 }
@@ -135,3 +149,5 @@ function integerParameter(value: string | undefined, fallback: number, minimum: 
   const number = Number(value);
   return Number.isSafeInteger(number) && number >= minimum && number <= maximum ? number : null;
 }
+
+function validDate(value: string): boolean { return Number.isFinite(Date.parse(value)); }
