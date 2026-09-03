@@ -183,6 +183,8 @@ const workflowStatusLabel: Record<string, string> = {
   failed: "失败",
   interrupted: "中断",
 };
+const knowledgeStatusLabel: Record<string, string> = { completed: "正常完成", degraded: "降级完成", failed: "失败", incomplete: "记录不完整" };
+const answerabilityLabel: Record<string, string> = { answerable: "可回答", partially_answerable: "部分可回答", unanswerable: "无法回答", conflicted: "知识冲突" };
 </script>
 <template>
   <div>
@@ -347,8 +349,8 @@ const workflowStatusLabel: Record<string, string> = {
             <el-table-column prop="kb_name" label="知识库" min-width="150" />
             <el-table-column prop="kb_version" label="发布版本" min-width="120" />
             <el-table-column prop="consumer_skill" label="消费位置" min-width="190" />
-            <el-table-column prop="query_status" label="执行状态" width="110" />
-            <el-table-column prop="answerability" label="可回答性" width="150" />
+            <el-table-column label="执行状态" width="110"><template #default="{ row }">{{ knowledgeStatusLabel[row.query_status] || "未记录" }}</template></el-table-column>
+            <el-table-column label="回答情况" width="120"><template #default="{ row }">{{ answerabilityLabel[row.answerability] || "未记录" }}</template></el-table-column>
             <el-table-column prop="hit_count" label="命中" width="75" />
             <el-table-column prop="citation_count" label="引用" width="75" />
             <el-table-column prop="warning_count" label="告警" width="75" />

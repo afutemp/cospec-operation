@@ -22,7 +22,7 @@ const answerLabels: Record<string,string> = { answerable: "可回答", partially
 const statusLabels: Record<string,string> = { completed: "正常完成", degraded: "降级完成", failed: "失败", incomplete: "记录不完整" };
 const answerability = computed(() => Object.entries(summary.value.by_answerability ?? {}).map(([name, value]) => ({ name: answerLabels[name] ?? name, value })));
 const answerChart = computed(() => ({ tooltip: { trigger: "item" }, legend: { bottom: 0 }, series: [{ type: "pie", radius: ["48%", "72%"], center: ["50%", "44%"], label: { formatter: "{b}  {c}" }, data: answerability.value }] }));
-const kbRows = computed(() => Object.entries(summary.value.by_kb ?? {}).map(([name, queries]) => ({ name, queries, versions: Object.keys(summary.value.by_version ?? {}).filter((value) => value !== "unknown").join("、") || "未记录" })).sort((a:any,b:any) => Number(b.queries)-Number(a.queries)));
+const kbRows = computed(() => Object.entries(summary.value.by_kb ?? {}).map(([name, queries]) => ({ name, queries, versions: [...new Set((summary.value.items ?? []).filter((item:any) => item.kb_name === name).map((item:any) => item.kb_version).filter(Boolean))].join("、") || "未记录" })).sort((a:any,b:any) => Number(b.queries)-Number(a.queries)));
 const items = computed(() => [...(summary.value.items ?? [])].reverse());
 function sync() { void router.replace({ query: { period: preset.value, from: dates.value[0], to: dates.value[1] } }); }
 watch(preset, (value) => { const range = presetRange(value); if (range) { dates.value = range.map((item) => item.toISOString()); sync(); } });
