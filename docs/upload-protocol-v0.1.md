@@ -4,6 +4,8 @@
 
 ## 请求
 
+上传接口无需登录 Token。服务端仍按 Schema、大小、哈希、offset 连续性和幂等键验证每次写入；看板查询及管理接口不在此开放范围内。
+
 ```http
 POST /api/v1/jsonl-chunks
 Content-Type: multipart/form-data

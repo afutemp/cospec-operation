@@ -8,7 +8,7 @@ import { HttpChunkReceiver } from "../collector/http-receiver.js";
 import { RunRegistry } from "../collector/runs.js";
 import { CollectorScanner } from "../collector/scanner.js";
 import { emptyState, JsonStateStore } from "../collector/state.js";
-import type { ChunkMetadata } from "../collector/types.js";
+import type { ArtifactMetadata, ChunkMetadata } from "../collector/types.js";
 import { createIngestApp } from "./app.js";
 import { MemoryChunkRepository } from "./memory-repository.js";
 
@@ -37,6 +37,47 @@ test("real HTTP multipart upload is accepted and idempotent", async () => {
   } finally { await app.close(); }
 });
 
+test("workflow lifecycle events are accepted idempotently and queryable", async () => {
+  const repository = new MemoryChunkRepository();
+  const app = await createIngestApp({ bearerToken: TOKEN, repository });
+  const address = await app.listen({ host: "127.0.0.1", port: 0 });
+  const runId = randomUUID();
+  const event = {
+    schema_version: "0.1.0", event_id: randomUUID(), cospec_run_id: runId,
+    event_type: "run_started", occurred_at: new Date().toISOString(),
+    workflow_kind: "small", workflow_name: "small-requirement-workflow",
+    actor: { employee_id: "63027", display_name: "测试规划员", proposer_dept: "研发体系/工程技术部" },
+  };
+  try {
+    for (let index = 0; index < 2; index += 1) {
+      const response = await fetch(`${address}/api/v1/run-events`, {
+        method: "POST", headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" }, body: JSON.stringify(event),
+      });
+      assert.equal(response.status, 200);
+    }
+    const response = await fetch(`${address}/api/v1/runs/${runId}/events`, { headers: { authorization: `Bearer ${TOKEN}` } });
+    assert.equal(response.status, 200);
+    assert.deepEqual((await response.json() as { items: unknown[] }).items.length, 1);
+    assert.deepEqual(repository.getRunEvents(runId)[0]?.actor, { employee_id: "63027", display_name: "测试规划员", proposer_dept: "研发体系/工程技术部" });
+  } finally { await app.close(); }
+});
+
+test("formal artifact uploads are idempotent, queryable and downloadable with authentication", async () => {
+  const repository = new MemoryChunkRepository(); const app = await createIngestApp({ bearerToken: TOKEN, repository });
+  const address = await app.listen({ host: "127.0.0.1", port: 0 }); const bytes = Buffer.from("# 评审版\n"); const runId = randomUUID();
+  const artifact: ArtifactMetadata = { schema_version: "0.1.0", upload_id: randomUUID(), cospec_run_id: runId, skill: "tr1-requirements-spec", attempt_id: "attempt-1", artifact_index: 0, artifact_role: "tr1_deliverable", file_name: "评审版.md", logical_path: "outputs/tr1-requirements-spec/评审版.md", content_type: "text/markdown", size_bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), created_at: new Date().toISOString() };
+  try {
+    const receiver = new HttpChunkReceiver({ baseUrl: address, bearerToken: TOKEN });
+    await receiver.acceptArtifact(artifact, bytes); await receiver.acceptArtifact(artifact, bytes);
+    const listed = await fetch(`${address}/api/v1/runs/${runId}/artifacts`, { headers: { authorization: `Bearer ${TOKEN}` } });
+    assert.equal(listed.status, 200); const listedItems = (await listed.json() as { items: Array<{ logical_path: string }> }).items; assert.equal(listedItems.length, 1); assert.equal(listedItems[0]?.logical_path, "outputs/tr1-requirements-spec/评审版.md");
+    const download = await fetch(`${address}/api/v1/artifacts/${artifact.upload_id}/download`, { headers: { authorization: `Bearer ${TOKEN}` } });
+    assert.equal(download.status, 200); assert.deepEqual(Buffer.from(await download.arrayBuffer()), bytes);
+    assert.equal((await fetch(`${address}/api/v1/artifacts/${artifact.upload_id}/download`)).status, 401);
+    await assert.rejects(new HttpChunkReceiver({ baseUrl: address, bearerToken: TOKEN }).acceptArtifact({ ...artifact, upload_id: randomUUID(), logical_path: "../private/TR1.md" }, bytes), /upload_http_400/);
+  } finally { await app.close(); }
+});
+
 test("collector cursor advances on HTTP confirmation and stays put on HTTP rejection", async () => {
   const root = await mkdtemp(join(tmpdir(), "cospec-http-cursor-"));
   const sessionsRoot = join(root, "sessions");
@@ -60,24 +101,20 @@ test("collector cursor advances on HTTP confirmation and stays put on HTTP rejec
     assert.ok(acceptedOffset > startOffset);
 
     await appendFile(sessionPath, '{"rejected":true}\n');
-    await assert.rejects(
-      new CollectorScanner(store, new HttpChunkReceiver({ baseUrl: address, bearerToken: "wrong" })).scan(),
-      /upload_http_401/,
-    );
+    await assert.rejects(new CollectorScanner(store, new HttpChunkReceiver({
+      baseUrl: address, fetchImplementation: async () => new Response(null, { status: 503 }),
+    })).scan(), /upload_http_503/);
     assert.equal(Object.values((await store.load()).files)[0]!.confirmedOffset, acceptedOffset);
   } finally { await app.close(); }
 });
 
-test("authentication and content validation failures are explicit and do not expose token", async () => {
+test("uploads require no token while content validation failures remain explicit", async () => {
   const app = await createIngestApp({ bearerToken: TOKEN });
   const address = await app.listen({ host: "127.0.0.1", port: 0 });
   try {
     const bytes = Buffer.from('{"ok":true}\n');
     const value = metadata(bytes, 0, null);
-    await assert.rejects(
-      new HttpChunkReceiver({ baseUrl: address, bearerToken: "wrong" }).accept(value, bytes),
-      (error: Error) => error.message === "upload_http_401" && !error.message.includes(TOKEN),
-    );
+    await new HttpChunkReceiver({ baseUrl: address }).accept(value, bytes);
     const invalidHash = structuredClone(value);
     invalidHash.file.sha256 = "0".repeat(64);
     const response = await rawUpload(address, TOKEN, invalidHash, bytes);

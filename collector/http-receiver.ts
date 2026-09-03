@@ -1,9 +1,9 @@
-import type { ChunkMetadata } from "./types.js";
+import type { ArtifactMetadata, ChunkMetadata, RunEvent } from "./types.js";
 import type { ChunkReceiver } from "./scanner.js";
 
 export interface HttpReceiverOptions {
   baseUrl: string;
-  bearerToken: string;
+  bearerToken?: string;
   timeoutMs?: number;
   fetchImplementation?: typeof fetch;
 }
@@ -14,6 +14,10 @@ export class HttpChunkReceiver implements ChunkReceiver {
     this.fetchImplementation = options.fetchImplementation ?? fetch;
   }
 
+  private headers(extra: Record<string, string> = {}): Record<string, string> {
+    return { ...extra, ...(this.options.bearerToken ? { authorization: `Bearer ${this.options.bearerToken}` } : {}) };
+  }
+
   async accept(metadata: ChunkMetadata, bytes: Buffer): Promise<void> {
     const form = new FormData();
     form.append("metadata", JSON.stringify(metadata));
@@ -22,7 +26,7 @@ export class HttpChunkReceiver implements ChunkReceiver {
     try {
       response = await this.fetchImplementation(`${this.options.baseUrl.replace(/\/$/, "")}/api/v1/jsonl-chunks`, {
         method: "POST",
-        headers: { authorization: `Bearer ${this.options.bearerToken}` },
+        headers: this.headers(),
         body: form,
         signal: AbortSignal.timeout(this.options.timeoutMs ?? 120_000),
       });
@@ -35,6 +39,35 @@ export class HttpChunkReceiver implements ChunkReceiver {
     try { body = await response.json(); }
     catch { throw new Error("invalid_upload_response"); }
     validateAccepted(body, metadata);
+  }
+
+  async acceptEvent(event: RunEvent): Promise<void> {
+    let response: Response;
+    try { response = await this.fetchImplementation(`${this.options.baseUrl.replace(/\/$/, "")}/api/v1/run-events`, {
+      method: "POST", headers: this.headers({ "content-type": "application/json" }),
+      body: JSON.stringify(event), signal: AbortSignal.timeout(this.options.timeoutMs ?? 120_000),
+    }); } catch (error) {
+      if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) throw new Error("upload_timeout");
+      throw new Error("upload_network_error", { cause: error });
+    }
+    if (!response.ok) throw new Error(`upload_http_${response.status}`);
+  }
+
+  async acceptArtifact(metadata: ArtifactMetadata, bytes: Buffer): Promise<void> {
+    const form = new FormData();
+    form.append("metadata", JSON.stringify(metadata));
+    form.append("artifact", new Blob([Uint8Array.from(bytes)], { type: metadata.content_type }), metadata.file_name);
+    let response: Response;
+    try { response = await this.fetchImplementation(`${this.options.baseUrl.replace(/\/$/, "")}/api/v1/artifacts`, {
+      method: "POST", headers: this.headers(), body: form,
+      signal: AbortSignal.timeout(this.options.timeoutMs ?? 120_000),
+    }); } catch (error) {
+      if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) throw new Error("upload_timeout");
+      throw new Error("upload_network_error", { cause: error });
+    }
+    if (!response.ok) throw new Error(`upload_http_${response.status}`);
+    const body = await response.json().catch(() => null) as Record<string, unknown> | null;
+    if (!body || body.upload_id !== metadata.upload_id || body.sha256 !== metadata.sha256 || !["accepted", "already_accepted"].includes(String(body.status))) throw new Error("invalid_upload_response");
   }
 }
 

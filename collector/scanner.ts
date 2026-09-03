@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { arch, platform } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { readNextChunk } from "./chunk.js";
 import { JsonStateStore } from "./state.js";
 import { TerminalIdentityStore } from "./terminal-identity.js";
-import type { ChunkMetadata, CollectorState, FileState, RunBinding } from "./types.js";
+import type { ArtifactMetadata, ChunkMetadata, CollectorState, FileState, RunBinding, RunEvent } from "./types.js";
 
-export interface ChunkReceiver { accept(metadata: ChunkMetadata, bytes: Buffer): Promise<void> }
+export interface ChunkReceiver { accept(metadata: ChunkMetadata, bytes: Buffer): Promise<void>; acceptEvent?(event: RunEvent): Promise<void>; acceptArtifact?(metadata: ArtifactMetadata, bytes: Buffer): Promise<void> }
 
 export class ScanCycleError extends Error {
   constructor(message: string, readonly completedChunks: number, readonly completedBytes: number) { super(message); }
@@ -22,6 +22,11 @@ export class FileOutboxReceiver implements ChunkReceiver {
     const metadataPath = join(this.directory, `${base}.metadata.json`);
     await atomicWrite(dataPath, bytes);
     await atomicWrite(metadataPath, Buffer.from(`${JSON.stringify(metadata, null, 2)}\n`));
+  }
+  async acceptArtifact(metadata: ArtifactMetadata, bytes: Buffer): Promise<void> {
+    await mkdir(join(this.directory, "artifacts"), { recursive: true, mode: 0o700 });
+    await atomicWrite(join(this.directory, "artifacts", `${metadata.sha256}.bin`), bytes);
+    await atomicWrite(join(this.directory, "artifacts", `${metadata.sha256}.metadata.json`), Buffer.from(`${JSON.stringify(metadata, null, 2)}\n`));
   }
 }
 
@@ -40,10 +45,32 @@ export class CollectorScanner {
 
   async scan(): Promise<{ chunks: number; bytes: number }> {
     const state = await this.store.load();
+    let firstError: unknown;
+    if (this.receiver.acceptEvent) {
+      while (state.pendingEvents?.length) {
+        await this.receiver.acceptEvent(state.pendingEvents[0]!);
+        state.pendingEvents.shift();
+        await this.store.save(state);
+      }
+    }
+    if (this.receiver.acceptArtifact) {
+      for (const artifact of Object.values(state.artifacts ?? {})) {
+        if (artifact.status !== "pending") continue;
+        try {
+          const artifactBytes = await readFile(artifact.spoolPath);
+          await this.receiver.acceptArtifact(artifact.metadata, artifactBytes);
+          artifact.status = "uploaded"; artifact.uploadedAt = new Date().toISOString();
+          await this.store.save(state);
+        } catch (error) { firstError ??= error; }
+      }
+      const pendingPaths = new Set(Object.values(state.artifacts ?? {}).filter((item) => item.status === "pending").map((item) => item.spoolPath));
+      for (const path of new Set(Object.values(state.artifacts ?? {}).filter((item) => item.status === "uploaded").map((item) => item.spoolPath))) {
+        if (path && !pendingPaths.has(path)) await rm(path, { force: true });
+      }
+    }
     const anonymousTerminalId = await this.terminalIdentity.getOrCreate();
     let chunks = 0;
     let bytes = 0;
-    let firstError: unknown;
     for (const file of Object.values(state.files)) {
       try {
         const run = collectibleRun(state, file);

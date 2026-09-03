@@ -11,7 +11,8 @@ if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("invali
 const host = process.env.COSPEC_TELEMETRY_HOST ?? "127.0.0.1";
 const storageRoot = resolve(process.env.COSPEC_TELEMETRY_STORAGE_DIR ?? "storage");
 const repository = await DurableChunkRepository.open(storageRoot);
-const app = await createIngestApp({ bearerToken: token, repository, queryRepository: repository });
+const adminBearerToken = process.env.COSPEC_TELEMETRY_ADMIN_TOKEN;
+const app = await createIngestApp({ bearerToken: token, ...(adminBearerToken ? { adminBearerToken } : {}), repository, queryRepository: repository });
 const address = await app.listen({ host, port });
 process.stdout.write(`cospec telemetry ingest listening at ${address}\n`);
 const parser = new ParserWorker(repository);

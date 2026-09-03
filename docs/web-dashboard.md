@@ -5,17 +5,27 @@
 ## 页面
 
 - `/`：运营总览，默认本周，支持今天、本周、本月、最近 7/30/90 天、自定义时间，以及 Agent 类型、Agent 版本和 Cospec 插件版本筛选；
+- 总览的“使用深度与持续使用”按匿名终端展示每终端 Run 数、使用频次、活跃天数、持续使用和首次观测；这些值不能解释为人员数量或人员留存；
+- 重点 Skill 表展示活跃时长以及扣除嵌套 Skill 后的自身 Token、工具、明确失败和子代理资源；
+- 重点 Skill 区域展示等待次数、单次等待 P50/P90、免等待比例和等待占总历时比例；
+- 总览展示 24/48 小时无活动 Run 并支持下钻，但不将其标成失败；
+- 总览按 Cospec 和 Agent 版本展示带样本量的观察性表现对比；
 - `/runs`：分页 Run 列表；
 - `/runs/:runId`：Run 概况、资源与上下文、工具与子代理、采集与解析详情；
 - `/login`：输入服务端 Bearer Token。
 
 Token 保存在当前浏览器标签页的 `sessionStorage` 中，不进入前端构建产物，也不长期写入 `localStorage`。刷新页面保持登录；关闭标签页后由浏览器清除。该登录方式仅用于开发和 PoC，正式版本将由 SSO 替换。
 
+## 总览分层
+
+总览展示活跃用户估算、工作流运行及终态、正式产物、产线覆盖和趋势，并提供同长度上一周期对比。活跃用户估算由已识别人员与未关联人员的匿名终端组成，两项必须同时展示。“运营排查”单独承载 Token、工具失败、等待用户、无活动 Run、版本观察和资源分布，避免技术诊断淹没汇报结论。
+
 ## 运行
 
 ```bash
 npm run build
-COSPEC_TELEMETRY_BEARER_TOKEN=<token> npm run server
+COSPEC_TELEMETRY_BEARER_TOKEN=<viewer-token> \
+COSPEC_TELEMETRY_ADMIN_TOKEN=<admin-token> npm run server
 ```
 
 开发时分别运行服务端和 `npm run web:dev`，Vite 将 `/api` 与 `/health` 代理到 `127.0.0.1:4318`。
@@ -38,6 +48,7 @@ Playwright 是固定的开发依赖，不进入页面运行链路。验收使用
 - 输入和输出 Token 分开显示；
 - 明确失败与状态覆盖率同时展示；
 - Claude Code 上下文上限不可得时明确说明，不按模型推断；
-- 不展示 JSONL 正文、工具参数、工具输出和本地文件路径。
+- Run 详情中的 Skill 行可展开，对比自身资源与包含嵌套子 Skill 的资源；
+- 普通用户不展示或下载 JSONL 正文；管理员可在 Run 详情按主会话、子代理和文件代次下载该 Run 实际采集到的 JSONL 片段。任何角色都不展示客户端或服务端本地路径。
 - 不展示“Agent 首次响应等待时间”：Router 的首次回复通常只是工作流选择菜单，不代表有效结果或工作流执行效率。
 - PoC 页面和静态资源使用 `Cache-Control: no-store`，避免开发期重新构建后浏览器继续引用已删除的旧哈希文件；缺失的 `/assets/*` 返回 404，不回退为 HTML。

@@ -6,7 +6,11 @@ import { JsonStateStore } from "./state.js";
 import { CollectorScanner, FileOutboxReceiver, ScanCycleError, type ChunkReceiver } from "./scanner.js";
 import { HttpChunkReceiver } from "./http-receiver.js";
 import { CollectorEventLog } from "./event-log.js";
-import type { CollectorCommand, CollectorDiagnostics, CollectorState, CommandResponse } from "./types.js";
+import type { CollectorCommand, CollectorDiagnostics, CollectorState, CommandResponse, RunEvent } from "./types.js";
+import { syncManifestArtifacts } from "./artifacts.js";
+
+const COLLECTOR_VERSION = "0.1.0";
+const PROTOCOL_VERSION = 1;
 
 export interface DaemonOptions {
   endpoint?: string;
@@ -28,9 +32,9 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Server> 
   });
   const stateDirectory = options.stateDirectory ?? getStateDirectory();
   const receiver = options.receiver ?? (process.env.COSPEC_TELEMETRY_SERVER_URL
-    ? new HttpChunkReceiver({
+      ? new HttpChunkReceiver({
         baseUrl: process.env.COSPEC_TELEMETRY_SERVER_URL,
-        bearerToken: requiredEnvironment("COSPEC_TELEMETRY_BEARER_TOKEN"),
+        ...(process.env.COSPEC_TELEMETRY_BEARER_TOKEN ? { bearerToken: process.env.COSPEC_TELEMETRY_BEARER_TOKEN } : {}),
       })
     : new FileOutboxReceiver(`${stateDirectory}/outbox`));
   const scanner = new CollectorScanner(store, receiver);
@@ -88,14 +92,31 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Server> 
         return { ok: true, data: state };
       }
       if (command.type === "ensure") {
-        const binding = await registry.ensure(state, command.agentType, command.agentSessionId, command.cospecRunId);
+        const binding = await registry.ensure(state, command.agentType, command.agentSessionId, command.cospecRunId, command.workflowKind, command.workflowName, command.actor);
+        queueEvent(state, { schema_version: "0.1.0", event_id: `${binding.cospecRunId}:run_started`, cospec_run_id: binding.cospecRunId,
+          event_type: "run_started", occurred_at: binding.startedAt, workflow_kind: command.workflowKind ?? "custom", workflow_name: command.workflowName ?? "unknown",
+          ...(command.actor ? { actor: { employee_id: command.actor.employeeId, display_name: command.actor.displayName,
+            ...(command.actor.proposerDept ? { proposer_dept: command.actor.proposerDept } : {}) } } : {}) });
         await store.save(state);
         await eventLog.write({ level: "info", event: "run_ensured", cospec_run_id: binding.cospecRunId, ...(binding.sourceFileId ? { source_file_id: binding.sourceFileId } : {}) });
         setImmediate(() => { void enqueue(scan).catch(() => undefined); });
         return { ok: true, data: binding };
       }
+      if (command.type === "event") {
+        if (!state.runs[command.event.cospec_run_id]) throw new Error("run_not_found");
+        queueEvent(state, command.event); await store.save(state); setImmediate(() => { void enqueue(scan).catch(() => undefined); });
+        return { ok: true, data: command.event };
+      }
+      if (command.type === "sync_artifacts") {
+        const result = await syncManifestArtifacts(state, command.cospecRunId, command.manifestPath, stateDirectory);
+        await store.save(state);
+        setImmediate(() => { void enqueue(scan).catch(() => undefined); });
+        return { ok: true, data: result };
+      }
       if (command.type === "finish") {
         const binding = await registry.finish(state, command.cospecRunId, command.status);
+        queueEvent(state, { schema_version: "0.1.0", event_id: `${binding.cospecRunId}:run_finished`, cospec_run_id: binding.cospecRunId,
+          event_type: "run_finished", occurred_at: binding.endedAt!, status: command.status });
         await store.save(state);
         await eventLog.write({ level: "info", event: "run_finished", cospec_run_id: binding.cospecRunId, ...(binding.sourceFileId ? { source_file_id: binding.sourceFileId } : {}) });
         await scan();
@@ -105,7 +126,10 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Server> 
       await eventLog.write({ level: "info", event: "daemon_stopping" });
       setImmediate(() => server.close());
       return { ok: true };
-    }).catch((error: unknown) => ({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+    }).then(withVersion).catch((error: unknown) => withVersion({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    }));
   };
   server = await listen(options.endpoint ?? getIpcEndpoint(), handle);
   await eventLog.write({ level: "info", event: "daemon_started" });
@@ -115,6 +139,15 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Server> 
   process.once("SIGTERM", shutdown);
   process.once("SIGINT", shutdown);
   return server;
+}
+
+function queueEvent(state: CollectorState, event: RunEvent): void {
+  state.pendingEvents ??= [];
+  if (!state.pendingEvents.some((item) => item.event_id === event.event_id)) state.pendingEvents.push(event);
+}
+
+function withVersion(response: CommandResponse): CommandResponse {
+  return { ...response, collectorVersion: COLLECTOR_VERSION, protocolVersion: PROTOCOL_VERSION };
 }
 
 function ensureDiagnostics(state: CollectorState): CollectorDiagnostics {
@@ -148,12 +181,6 @@ function safeErrorCode(error: unknown): string {
 function diagnosticContext(state: CollectorState): { cospecRunId?: string; sourceFileId?: string } {
   const run = Object.values(state.runs).find((item) => item.status === "open" || (item.endOffset !== null && item.sourceFileId && state.files[item.sourceFileId]?.confirmedOffset !== item.endOffset));
   return run ? { cospecRunId: run.cospecRunId, ...(run.sourceFileId ? { sourceFileId: run.sourceFileId } : {}) } : {};
-}
-
-function requiredEnvironment(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`missing_environment:${name}`);
-  return value;
 }
 
 function scanIntervalFromEnvironment(): number {

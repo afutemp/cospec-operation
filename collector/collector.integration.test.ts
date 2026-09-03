@@ -1,21 +1,70 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import test from "node:test";
+import { createIngestApp } from "../server/app.js";
+import { DurableChunkRepository } from "../server/durable-repository.js";
 
-interface CliResult { ok: boolean; data?: unknown; error?: string }
+interface CliResult { ok: boolean; data?: unknown; error?: string; collector_version?: string; protocol_version?: number }
 
 test("CLI rejects invalid integration parameters with structured JSON and nonzero exit", async () => {
   const invalidAgent = await cliFailure(["ensure", "--agent", "other", "--session-id", randomUUID(), "--run-id", randomUUID()], process.env);
-  assert.deepEqual(invalidAgent.result, { ok: false, error: "invalid_option:agent" });
+  assert.equal(invalidAgent.result.error, "invalid_option:agent");
+  assert.equal(invalidAgent.result.protocol_version, 1);
   assert.notEqual(invalidAgent.code, 0);
   const invalidStatus = await cliFailure(["finish", "--run-id", randomUUID(), "--status", "other"], process.env);
-  assert.deepEqual(invalidStatus.result, { ok: false, error: "invalid_option:status" });
+  assert.equal(invalidStatus.result.error, "invalid_option:status");
   const invalidRun = await cliFailure(["finish", "--run-id", "not-a-uuid"], process.env);
-  assert.deepEqual(invalidRun.result, { ok: false, error: "invalid_option:run-id" });
+  assert.equal(invalidRun.result.error, "invalid_option:run-id");
+});
+
+test("daemon restart preserves multiple open Runs until each receives an explicit finish", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cospec-restart-recovery-"));
+  const sessionsRoot = join(root, "sessions");
+  const stateDirectory = join(root, "state");
+  const firstSessionId = randomUUID();
+  const secondSessionId = randomUUID();
+  const pendingSessionId = randomUUID();
+  const firstRunId = randomUUID();
+  const secondRunId = randomUUID();
+  const pendingRunId = randomUUID();
+  const namespace = `restart-${process.pid}-${Date.now()}`;
+  await mkdir(sessionsRoot, { recursive: true });
+  for (const sessionId of [firstSessionId, secondSessionId]) {
+    await writeFile(join(sessionsRoot, `rollout-${sessionId}.jsonl`),
+      `${JSON.stringify({ type: "session_meta", payload: { id: sessionId, cli_version: "0.150.1" } })}\n`);
+  }
+  const env = { ...process.env, CODEX_SESSIONS_ROOT: sessionsRoot, COSPEC_TELEMETRY_STATE_DIR: stateDirectory,
+    COSPEC_TELEMETRY_NAMESPACE: namespace };
+  try {
+    const firstEnsure = await cli(["ensure", "--agent", "codex", "--session-id", firstSessionId, "--run-id", firstRunId], env);
+    const firstStartOffset = (firstEnsure.data as { startOffset: number }).startOffset;
+    await cli(["ensure", "--agent", "codex", "--session-id", pendingSessionId, "--run-id", pendingRunId], env);
+    await cli(["shutdown"], env);
+    await cli(["ensure", "--agent", "codex", "--session-id", secondSessionId, "--run-id", secondRunId], env);
+    const resumedFirst = await cli(["ensure", "--agent", "codex", "--session-id", firstSessionId, "--run-id", firstRunId], env);
+    assert.equal((resumedFirst.data as { status: string }).status, "open");
+    assert.equal((resumedFirst.data as { startOffset: number }).startOffset, firstStartOffset);
+    let recovered = JSON.parse(await readFile(join(stateDirectory, "state.json"), "utf8"));
+    assert.equal(recovered.runs[firstRunId].status, "open");
+    assert.equal(recovered.runs[secondRunId].status, "open");
+    assert.equal(recovered.runs[pendingRunId].status, "pending");
+
+    await cli(["finish", "--run-id", firstRunId, "--status", "completed"], env);
+    recovered = JSON.parse(await readFile(join(stateDirectory, "state.json"), "utf8"));
+    assert.equal(recovered.runs[firstRunId].status, "completed");
+    assert.equal(recovered.runs[secondRunId].status, "open");
+
+    await cli(["finish", "--run-id", secondRunId, "--status", "interrupted"], env);
+    recovered = JSON.parse(await readFile(join(stateDirectory, "state.json"), "utf8"));
+    assert.equal(recovered.runs[secondRunId].status, "interrupted");
+  } finally {
+    await cli(["shutdown"], env).catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("CLI, daemon and local mock receiver support complete-line incremental resume", async () => {
@@ -85,6 +134,25 @@ test("CLI, daemon and local mock receiver support complete-line incremental resu
     await cli(["shutdown"], env).catch(() => undefined);
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("single-file Collector freezes, uploads, lists and downloads a manifest artifact through durable HTTP storage", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cospec-artifact-e2e-")); const sessionsRoot = join(root, "sessions"); const stateDirectory = join(root, "state");
+  const sessionId = randomUUID(); const runId = randomUUID(); const token = "artifact-e2e-token"; await mkdir(sessionsRoot, { recursive: true });
+  await writeFile(join(sessionsRoot, `rollout-${sessionId}.jsonl`), `${JSON.stringify({ type: "session_meta", payload: { id: sessionId, cli_version: "0.150.1" } })}\n`);
+  const artifactPath = join(root, "tr1用户需求文档_评审版.md"); const bytes = Buffer.from("# 国产化域控评审版\n"); await writeFile(artifactPath, bytes);
+  const manifestPath = join(root, "manifest.json"); await writeFile(manifestPath, JSON.stringify({ run_id: runId, products: { "tr1-requirements-spec": { role: "tr1_deliverable", attempts: [{ attempt_id: "attempt-final", status: "done", recorded_at: new Date().toISOString(), artifacts: [{ kind: "file", role: "tr1_deliverable", path: artifactPath, size_bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") }] }] } } }));
+  const repository = await DurableChunkRepository.open(join(root, "server")); const app = await createIngestApp({ bearerToken: token, repository, queryRepository: repository });
+  const address = await app.listen({ host: "127.0.0.1", port: 0 }); const env = { ...process.env, CODEX_SESSIONS_ROOT: sessionsRoot, COSPEC_TELEMETRY_STATE_DIR: stateDirectory, COSPEC_TELEMETRY_NAMESPACE: `artifact-${process.pid}-${Date.now()}`, COSPEC_TELEMETRY_SERVER_URL: address, COSPEC_TELEMETRY_BEARER_TOKEN: token };
+  try {
+    await cli(["ensure", "--agent", "codex", "--session-id", sessionId, "--run-id", runId], env);
+    const synced = await cli(["sync-artifacts", "--run-id", runId, "--manifest", manifestPath], env); assert.deepEqual(synced.data, { queued: 1, known: 0, rejected: 0 });
+    await cli(["finish", "--run-id", runId, "--status", "completed"], env);
+    const list = await fetch(`${address}/api/v1/runs/${runId}/artifacts`, { headers: { authorization: `Bearer ${token}` } }); const items = (await list.json() as { items: Array<{ upload_id: string; file_name: string }> }).items;
+    assert.equal(items.length, 1); assert.equal(items[0]?.file_name, "tr1用户需求文档_评审版.md");
+    const download = await fetch(`${address}/api/v1/artifacts/${items[0]!.upload_id}/download`, { headers: { authorization: `Bearer ${token}` } }); assert.deepEqual(Buffer.from(await download.arrayBuffer()), bytes);
+    const collectorState = await state(stateDirectory) as any; assert.equal((Object.values(collectorState.artifacts) as any[])[0]?.status, "uploaded");
+  } finally { await cli(["shutdown"], env).catch(() => undefined); await app.close(); repository.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 function metadataStart(name: string): number {

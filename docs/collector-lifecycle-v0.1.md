@@ -1,10 +1,10 @@
 # Collector 生命周期与 Cospec Run 关联协议 0.1.0
 
-> 状态：2026-08-31 已冻结。对应 `POC-01A`。
+> 状态：2026-09-02 已实现并通过 Linux 验证。Windows 保留到后续端到端验收。
 
 ## 角色边界
 
-- PoC 验证者：取得 Agent Session ID，生成或恢复 Cospec Run ID，手动调用生命周期命令；
+- Cospec 工作流脚本：从 Agent 环境取得 Session ID，在用户选定工作流后创建或恢复 Run，并调用生命周期命令；
 - Collector CLI：提供 `ensure`、`finish`、`status` 和 `scan`；
 - Collector daemon：每用户单例，发现和上传多个会话文件，维护游标与 Run 关联；
 - Ingest API：保存原始块和关联记录，不从正文猜测 Run。
@@ -37,13 +37,13 @@ cospec-telemetry ensure \
 cospec-telemetry finish --run-id "$COSPEC_RUN_ID" --status completed
 ```
 
-`finish` 将当时已落盘的最后一个完整 JSONL 行末 byte offset 记为结束边界，状态允许 `completed` 或 `failed`。重复提交相同结果按幂等成功；冲突结果必须报错，不静默覆盖。
+`finish` 将当时已落盘的最后一个完整 JSONL 行末 byte offset 记为结束边界，状态允许 `completed`、`failed` 或 `interrupted`。重复提交相同结果按幂等成功；冲突结果必须报错，不静默覆盖。
 
 如果 Run 在主会话边界内创建了具有显式关联 ID 的子代理，daemon 会为每个子代理建立独立文件游标，并在 `finish` 时分别冻结其完整行结束位置。子代理不会改变顶层 Run 绑定的 `agent_session_id`。
 
 Collector 在返回 `finish` 前补传截至结束边界的完整行；达到该边界后不再采集此 Run。后续普通对话不会上传，除非新的 `ensure` 建立另一个 Run。
 
-未调用 `finish` 的 Run 保持 `open`。下次路由可使用同一 Run ID 恢复，或者显式以 `interrupted` 结束；不得仅凭超时猜测业务结果。
+未调用 `finish` 的 Run 始终保持 `open`（JSONL 尚未出现时保持 `pending`）。电脑或 Collector 重启后，同一 Run ID 再次 `ensure` 会继续该 Run；新建其他 Run 不会改变任何旧 Run，多个 Run 可以分别恢复。只有显式 `finish` 才写入 `completed`、`failed` 或 `interrupted` 终态。服务端可以根据最后上报时间展示“长时间无活动”等运营判断，但不得借此改写客户端上报的业务终态。
 
 ## 关联记录
 
@@ -72,17 +72,17 @@ Collector 在返回 `finish` 前补传截至结束边界的完整行；达到该
 - IPC 使用 Node.js 内置 `node:net`，服务端和客户端逻辑跨平台共用，不引入第三方 IPC 库，也不监听 TCP 端口；
 - 只有 endpoint 字符串按平台生成：Linux 使用包含用户 UID 的抽象 Unix domain socket，Windows 使用当前用户专属的 Named Pipe；端点用于本地通信和并发启动互斥，不创建锁文件、PID 文件或文件系统 socket；
 - daemon 可同时维护多个 Session 和文件游标；
+- Collector 客户端以单个 `.mjs` 文件随 Cospec 插件分发；Cospec 优先使用显式开发配置，其次使用内置文件，最后才回退到 PATH 命令；服务端和 Web 不随插件分发；
+- Cospec 插件版本和 Collector 版本独立发布，通过 `protocol_version` 判断调用契约是否兼容；当前协议版本为 `1`。版本信息由实际 daemon 返回，避免新 CLI 误报旧 daemon 兼容；
 - 游标、generation 与 Run 关联保存为权限仅当前用户可读写的 JSON 文件，并以同目录临时文件加原子替换方式更新；Linux 使用 `${XDG_STATE_HOME:-~/.local/state}/cospec-telemetry`，Windows 使用 `%LOCALAPPDATA%\\CospecTelemetry`；用户侧不使用 SQLite；
 - 后台进程、路径和文件状态优先直接使用 Node.js 跨平台 API；仅在测试证明行为不同时增加局部平台分支。Windows 与 Linux 分别执行单例、重启续传、截断和轮转测试；
 - 认证凭据仅通过环境或受限配置读取，不写入关联记录；
 - 收到退出信号后不再接收新任务，完成当前块的确定性处理并保存游标后退出；
 - `scan` 向常驻 Collector 请求立即执行一轮发现、切块和上传；daemon 自身也按内部周期持续扫描。
 
-## 当前手动验证
+## 当前集成行为
 
-- 工作流实质执行前手动调用 `ensure`；
-- 将 Run ID 保存在本次验证记录中，不能只依赖临时 shell 变量；
-- 工作流正常或失败结束时手动调用 `finish`；
-- `ensure` 失败时明确报告遥测未启动，不得伪造关联成功，也不得阻止用户选择继续业务工作流。
-
-`cospec-router` 的自动调用属于后续集成：CLI 接口通过验收前不修改已安装 Router。
+- `cospec-router` 在用户选定工作流后执行 `run-start`，脚本创建 Run ID、保存 manifest，并调用 Collector `ensure`；
+- 小需求、大需求和自定义工作流在完整成功时调用 `run-finish --status completed`，明确失败时用 `failed`，用户取消或放弃时用 `interrupted`；暂停等待输入时不结束 Run；
+- `ensure` 或上传失败会留下可重试状态和诊断，但不阻断规划工作流；Run/manifest 自身创建失败则停止进入工作流；
+- Linux 已验证内置 Collector 无需全局安装即可关联真实 Codex JSONL 并结束 Run。Windows 端到端验证尚未勾选。

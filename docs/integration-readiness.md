@@ -6,7 +6,7 @@
 
 | 变量 | 组件 | 必填/默认 | 含义 |
 |---|---|---|---|
-| `COSPEC_TELEMETRY_BEARER_TOKEN` | 两端 | HTTP 模式必填 | 两端必须使用相同 token，只从进程环境读取 |
+| `COSPEC_TELEMETRY_BEARER_TOKEN` | Server | 必填 | 部署只读看板 Token，不用于 Collector 上报 |
 | `COSPEC_TELEMETRY_SERVER_URL` | Collector | 未设置则写本地 outbox | 例如 `http://127.0.0.1:4318` |
 | `COSPEC_TELEMETRY_STORAGE_DIR` | Server | `./storage` | SQLite 与不可变原始块根目录 |
 | `COSPEC_TELEMETRY_HOST` | Server | `127.0.0.1` | 监听地址 |
@@ -18,7 +18,7 @@
 | `CLAUDE_CODE_PROJECTS_ROOT` | Collector | `~/.claude/projects` | Claude Code projects 根目录 |
 | `CLAUDE_SESSION_ID` | Collector CLI | 可由 `--session-id` 代替 | 精确关联 Claude Code JSONL |
 
-Server 缺少 token、端口非法时会在监听前失败。Collector 配置了 Server URL 却缺少 token 时，daemon 启动失败，CLI 返回非零退出码。daemon 会继承首次拉起它的环境；改变 URL 或 token 后先执行 `shutdown`。
+Server 缺少看板 Token、端口非法时会在监听前失败。Collector 只需 Server URL，无需上报 Token。daemon 会继承首次拉起它的环境；改变 URL 后先执行 `shutdown`。
 
 Collector 默认每 5 分钟后台扫描一次。`ensure` 后异步立即扫描，`finish` 和显式 `scan` 立即扫描；因此正常短 Run 通常由开始和结束动作完成采集，不依赖高频轮询。
 
@@ -41,7 +41,6 @@ curl --noproxy 127.0.0.1 http://127.0.0.1:4318/health/live
 curl --noproxy 127.0.0.1 http://127.0.0.1:4318/health/ready
 
 export COSPEC_TELEMETRY_SERVER_URL="http://127.0.0.1:4318"
-export COSPEC_TELEMETRY_BEARER_TOKEN="<temporary-test-token>"
 node dist/collector/cli.js ensure \
   --agent codex \
   --session-id "$CODEX_SESSION_ID" \

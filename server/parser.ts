@@ -1,4 +1,4 @@
-export const PARSER_VERSION = "0.3.0";
+export const PARSER_VERSION = "0.5.1";
 
 const CODEX_KNOWN_TYPES = new Set(["session_meta", "event_msg", "response_item", "turn_context", "compacted"]);
 const CLAUDE_CODE_KNOWN_TYPES = new Set(["queue-operation", "user", "assistant", "attachment", "last-prompt", "mode", "system"]);
@@ -20,6 +20,15 @@ export interface CompactionFact {
   preTokens: number | null; postTokens: number | null;
 }
 export interface ContextWindowFact { recordIndex: number; timestamp: string | null; contextWindowTokens: number }
+export interface SkillMarkerFact {
+  recordIndex: number; itemIndex: number; markerIndex: number; timestamp: string | null;
+  phase: "start" | "end"; skill: string; executionId: string;
+  status: "ok" | "failed" | "interrupted" | "orphan" | null;
+}
+export interface TurnEventFact {
+  recordIndex: number; itemIndex: number; timestamp: string | null;
+  kind: "agent_message" | "user_prompt";
+}
 export interface ParseResult {
   parserVersion: string;
   status: "completed" | "completed_with_errors";
@@ -37,6 +46,8 @@ export interface ParseResult {
   toolResultFacts: ToolResultFact[];
   compactionFacts: CompactionFact[];
   contextWindowFacts: ContextWindowFact[];
+  skillMarkerFacts: SkillMarkerFact[];
+  turnEventFacts: TurnEventFact[];
 }
 
 export function parseCodexJsonl(bytes: Buffer, parserVersion = PARSER_VERSION): ParseResult {
@@ -66,6 +77,8 @@ function parseJsonl(bytes: Buffer, knownTypes: ReadonlySet<string>, parserVersio
   const toolResultFacts: ToolResultFact[] = [];
   const compactionFacts: CompactionFact[] = [];
   const contextWindowFacts: ContextWindowFact[] = [];
+  const skillMarkerFacts: SkillMarkerFact[] = [];
+  const turnEventFacts: TurnEventFact[] = [];
   for (let index = 0; index < bytes.length; index += 1) {
     if (bytes[index] !== 0x0a) continue;
     totalLines += 1;
@@ -77,8 +90,8 @@ function parseJsonl(bytes: Buffer, knownTypes: ReadonlySet<string>, parserVersio
       typeCounts[type] = (typeCounts[type] ?? 0) + 1;
       if (!knownTypes.has(type)) unknownTypeLines += 1;
       if (typeof value.timestamp === "string" && Number.isFinite(Date.parse(value.timestamp))) timestamps.push(value.timestamp);
-      if (knownTypes === CODEX_KNOWN_TYPES) extractCodexFacts(value, totalLines, messageFacts, tokenUsageFacts, toolCallFacts, toolResultFacts, compactionFacts, contextWindowFacts);
-      else extractClaudeCodeFacts(value, totalLines, messageFacts, tokenUsageFacts, toolCallFacts, toolResultFacts, compactionFacts);
+      if (knownTypes === CODEX_KNOWN_TYPES) extractCodexFacts(value, totalLines, messageFacts, tokenUsageFacts, toolCallFacts, toolResultFacts, compactionFacts, contextWindowFacts, skillMarkerFacts, turnEventFacts);
+      else extractClaudeCodeFacts(value, totalLines, messageFacts, tokenUsageFacts, toolCallFacts, toolResultFacts, compactionFacts, skillMarkerFacts, turnEventFacts);
     } catch {
       invalidLines += 1;
       diagnostics.push({ line: totalLines, byteOffset: lineStart, code: "invalid_json" });
@@ -92,11 +105,11 @@ function parseJsonl(bytes: Buffer, knownTypes: ReadonlySet<string>, parserVersio
     totalLines, validLines, invalidLines, unknownTypeLines, typeCounts,
     firstTimestamp: timestamps[0] ?? null,
     lastTimestamp: timestamps.at(-1) ?? null,
-    diagnostics, messageFacts, tokenUsageFacts, toolCallFacts, toolResultFacts, compactionFacts, contextWindowFacts,
+    diagnostics, messageFacts, tokenUsageFacts, toolCallFacts, toolResultFacts, compactionFacts, contextWindowFacts, skillMarkerFacts, turnEventFacts,
   };
 }
 
-function extractCodexFacts(value: Record<string, unknown>, recordIndex: number, messages: MessageFact[], tokens: TokenUsageFact[], calls: ToolCallFact[], results: ToolResultFact[], compactions: CompactionFact[], contextWindows: ContextWindowFact[]): void {
+function extractCodexFacts(value: Record<string, unknown>, recordIndex: number, messages: MessageFact[], tokens: TokenUsageFact[], calls: ToolCallFact[], results: ToolResultFact[], compactions: CompactionFact[], contextWindows: ContextWindowFact[], skillMarkers: SkillMarkerFact[], turnEvents: TurnEventFact[]): void {
   const timestamp = validTimestamp(value.timestamp);
   const payload = object(value.payload);
   if (!payload) return;
@@ -105,6 +118,8 @@ function extractCodexFacts(value: Record<string, unknown>, recordIndex: number, 
   if (contextWindowTokens !== null) contextWindows.push({ recordIndex, timestamp, contextWindowTokens });
   if (value.type === "response_item" && payload.type === "message" && typeof payload.role === "string") {
     messages.push({ recordIndex, timestamp, role: payload.role, model: null });
+    if (payload.role === "user") turnEvents.push({ recordIndex, itemIndex: 0, timestamp, kind: "user_prompt" });
+    else if (payload.role === "assistant" && hasVisibleText(payload.content)) turnEvents.push({ recordIndex, itemIndex: 0, timestamp, kind: "agent_message" });
   }
   if (value.type === "event_msg" && payload.type === "token_count") {
     const usage = object(object(payload.info)?.last_token_usage);
@@ -119,10 +134,11 @@ function extractCodexFacts(value: Record<string, unknown>, recordIndex: number, 
     results.push({ recordIndex, itemIndex: 0, timestamp, callId: payload.call_id,
       status: exitCode === null ? "unknown" : exitCode === 0 ? "success" : "failure",
       failureCode: exitCode !== null && exitCode !== 0 ? "nonzero_exit_code" : null });
+    extractSkillMarkers(payload.output, recordIndex, 0, timestamp, skillMarkers);
   }
 }
 
-function extractClaudeCodeFacts(value: Record<string, unknown>, recordIndex: number, messages: MessageFact[], tokens: TokenUsageFact[], calls: ToolCallFact[], results: ToolResultFact[], compactions: CompactionFact[]): void {
+function extractClaudeCodeFacts(value: Record<string, unknown>, recordIndex: number, messages: MessageFact[], tokens: TokenUsageFact[], calls: ToolCallFact[], results: ToolResultFact[], compactions: CompactionFact[], skillMarkers: SkillMarkerFact[], turnEvents: TurnEventFact[]): void {
   const timestamp = validTimestamp(value.timestamp);
   if (value.type === "system" && value.subtype === "compact_boundary") {
     const metadata = object(value.compactMetadata);
@@ -135,6 +151,11 @@ function extractClaudeCodeFacts(value: Record<string, unknown>, recordIndex: num
   const role = typeof message.role === "string" ? message.role : typeof value.type === "string" ? value.type : null;
   const model = typeof message.model === "string" ? message.model : null;
   if ((value.type === "user" || value.type === "assistant") && role) messages.push({ recordIndex, timestamp, role, model });
+  if (value.type === "user" && value.isCompactSummary !== true && value.isMeta !== true && isHumanPrompt(message.content)) {
+    turnEvents.push({ recordIndex, itemIndex: 0, timestamp, kind: "user_prompt" });
+  } else if (value.type === "assistant" && hasVisibleText(message.content)) {
+    turnEvents.push({ recordIndex, itemIndex: 0, timestamp, kind: "agent_message" });
+  }
   const usage = object(message.usage);
   if (usage) tokens.push(tokenFact(recordIndex, timestamp, model, usage, "claude_code"));
   if (!Array.isArray(message.content)) return;
@@ -149,7 +170,55 @@ function extractClaudeCodeFacts(value: Record<string, unknown>, recordIndex: num
       results.push({ recordIndex, itemIndex, timestamp, callId: block.tool_use_id,
         status: explicit === null ? "unknown" : explicit ? "failure" : "success",
         failureCode: explicit ? "explicit_is_error" : null });
+      extractSkillMarkers(block.content, recordIndex, itemIndex, timestamp, skillMarkers);
     }
+  });
+}
+
+const SKILL_MARKER = /^\[COSPEC:SKILL:(START|END):([A-Za-z0-9][A-Za-z0-9._:-]{0,127}):([A-Za-z0-9]{8})(?::(OK|FAILED|INTERRUPTED|ORPHAN))?\]$/;
+
+function extractSkillMarkers(value: unknown, recordIndex: number, itemIndex: number, timestamp: string | null, facts: SkillMarkerFact[]): void {
+  let markerIndex = 0;
+  for (const text of nestedStrings(value)) {
+    for (const line of text.split(/\r?\n/)) {
+      const match = SKILL_MARKER.exec(line.trim());
+      if (!match) continue;
+      const phase = match[1] === "START" ? "start" : "end";
+      const rawStatus = match[4];
+      if ((phase === "start" && rawStatus) || (phase === "end" && !rawStatus)) continue;
+      facts.push({
+        recordIndex, itemIndex, markerIndex, timestamp, phase, skill: match[2]!, executionId: match[3]!,
+        status: rawStatus ? rawStatus.toLowerCase() as SkillMarkerFact["status"] : null,
+      });
+      markerIndex += 1;
+    }
+  }
+}
+
+function nestedStrings(value: unknown, depth = 0): string[] {
+  if (depth > 4) return [];
+  if (typeof value === "string") return value.length <= 1_000_000 ? [value] : [];
+  if (Array.isArray(value)) return value.flatMap((item) => nestedStrings(item, depth + 1));
+  const record = object(value);
+  return record ? Object.values(record).flatMap((item) => nestedStrings(item, depth + 1)) : [];
+}
+
+function isHumanPrompt(content: unknown): boolean {
+  if (typeof content === "string") return content.trim().length > 0;
+  if (!Array.isArray(content)) return false;
+  return content.some((item) => {
+    const block = object(item);
+    return block?.type === "text" && typeof block.text === "string" && block.text.trim().length > 0;
+  }) && !content.some((item) => object(item)?.type === "tool_result");
+}
+
+function hasVisibleText(content: unknown): boolean {
+  if (typeof content === "string") return content.trim().length > 0;
+  if (!Array.isArray(content)) return false;
+  return content.some((item) => {
+    const block = object(item);
+    return (block?.type === "text" || block?.type === "output_text")
+      && typeof block.text === "string" && block.text.trim().length > 0;
   });
 }
 

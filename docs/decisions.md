@@ -53,3 +53,11 @@ Collector 第一版必须同时支持 Linux 和 Windows。优先依赖 Node.js �
 ## D-012 按 Cospec Run 边界采集
 
 Collector 常驻不等于持续上传整份 Agent 会话。`ensure` 将当时最后一个完整行 offset 记为 Run 起点；只在 Run 活动期间增量采集。`finish` 固定结束 offset，补传至该位置后停止该 Run。Run 之前、Run 之间和 Run 结束后的普通对话不上传。上传连续性按 `cospec_run_id + source_file_id + generation` 计算，Run 首块不要求从原文件 offset 0 开始。本决策覆盖早期“首次从文件头上传”的设想。
+
+## D-013 Skill 执行时长采用统一标记口径
+
+Codex 和 Claude Code 都以 Cospec 输出的结构化 `SKILL START/END` 标记作为 Skill 调用量、执行状态和执行时长的唯一正式口径。Collector 从原始 JSONL 的工具结果中解析标记；Claude Code OpenTelemetry、Tool Hook 和子代理生命周期不形成第二套统计口径。
+
+标记命令只接收动作和 Skill 名称，运行标识、会话标识、工作流及执行标识由脚本自动取得或生成。成功输出保持为一行短标记，避免给 LLM 上下文引入无关信息。有 START 而没有匹配 END 的执行记为“未正常结束”，不猜测结束时间，也不计算执行时长。详细设计见 [Skill 执行时长标记方案](skill-duration-markers.md)。
+
+领导周报和运营页面中的 Skill “执行时长”使用活跃时长：START 到 END 总历时减去其中有明确边界的用户回复等待。等待边界为 Agent 最后一条可见消息到下一条人工输入；工具结果、压缩摘要和控制记录不算人工输入。接口同时保留总历时与等待时长，便于解释和排查，不对缺失边界做猜测。

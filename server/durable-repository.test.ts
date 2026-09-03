@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type { ChunkMetadata } from "../collector/types.js";
+import type { ArtifactMetadata, ChunkMetadata } from "../collector/types.js";
 import { DurableChunkRepository } from "./durable-repository.js";
 
 test("durable repository preserves bytes, parser status and idempotency across restart", async () => {
@@ -56,6 +56,16 @@ test("orphan raw files are reported and storage failure is not accepted", async 
   await assert.rejects(broken.accept(metadata(bytes, 0, null), bytes));
   assert.equal(broken.pendingChunks().length, 0);
   broken.close();
+});
+
+test("durable artifact content and Run association survive a server restart", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cospec-durable-artifact-")); const bytes = Buffer.from("# TR1\n"); const runId = randomUUID();
+  const artifact: ArtifactMetadata = { schema_version: "0.1.0", upload_id: randomUUID(), cospec_run_id: runId, skill: "tr1-requirements-spec", attempt_id: "final", artifact_index: 0, artifact_role: "tr1_deliverable", file_name: "TR1.md", logical_path: "outputs/tr1-requirements-spec/TR1.md", content_type: "text/markdown", size_bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), created_at: new Date().toISOString() };
+  let repository = await DurableChunkRepository.open(root); assert.deepEqual(await repository.acceptArtifact(artifact, bytes), { status: "accepted" });
+  repository.acceptRunEvent({ schema_version: "0.1.0", event_id: `${runId}:start`, cospec_run_id: runId, event_type: "run_started", occurred_at: artifact.created_at, workflow_kind: "large", workflow_name: "large-requirement-workflow", actor: { employee_id: "63027", display_name: "测试规划员" } }); repository.close();
+  repository = await DurableChunkRepository.open(root); assert.equal(repository.listArtifacts(runId).length, 1); assert.deepEqual((await repository.getArtifact(artifact.upload_id))?.bytes, bytes); assert.deepEqual(await repository.acceptArtifact(artifact, bytes), { status: "already_accepted" });
+  assert.deepEqual((repository.getWorkflowSummary() as any).artifacts, { total: 1, runs_with_artifacts: 1, run_coverage: 1, by_role: { tr1_deliverable: 1 } }); repository.close();
+  await rm(root, { recursive: true, force: true });
 });
 
 function metadata(bytes: Buffer, start: number, previous: string | null, runId: string = randomUUID(), sourceFileId: string = randomUUID()): ChunkMetadata {

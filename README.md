@@ -23,14 +23,13 @@ Cospec 原始遥测数据端到端链路 PoC。
 - 第一版解析：JSON 行合法性、记录类型、时间范围和诊断；
 - 当前提供 Run 级重放和只读查询 API。
 - 当前提供与服务端同源运行的运营总览、Run 列表和 Run 详情页面。
+- 当前上传 Cospec manifest 中登记的正式产物，并提供鉴权列表与下载。
 
 ## 当前不做
 
 - 正式的操作系统服务安装和生产调度；
-- artifact manifest、产物元数据和产物正文；
 - Query Adapter 和 Evaluator；
-- Skill 等业务关联（当前只关联 Cospec Run 与 Agent Session）；
-- 完整指标和正式 Dashboard；
+- 产物正文解析、在线预览、全文搜索和质量评价；
 - 正式环境部署。
 
 ## 文档入口
@@ -57,6 +56,7 @@ Cospec 原始遥测数据端到端链路 PoC。
 - [只读查询 API](docs/query-api.md)
 - [Linux 真实端到端验收记录](docs/e2e-linux-2026-09-01.md)
 - [Linux HTTP 故障恢复验收记录](docs/e2e-http-outage-recovery-2026-09-01.md)
+- [Cospec 集成真实端到端验收记录](docs/e2e-cospec-integration-2026-09-02.md)
 - [集成前运行与冒烟检查](docs/integration-readiness.md)
 - [npm 安装与交付验收记录](docs/package-delivery-2026-09-01.md)
 - [验收场景](docs/acceptance.md)
@@ -67,7 +67,7 @@ Cospec 原始遥测数据端到端链路 PoC。
 
 生成的 npm 包提供三个入口：
 
-- `cospec-telemetry`：Collector 的 `ensure/finish/status/scan/shutdown`；
+- `cospec-telemetry`：Collector 的 `ensure/event/sync-artifacts/finish/status/scan/shutdown`；
 - `cospec-telemetry-server`：持久化接收、解析和查询服务；
 - `cospec-telemetry-replay`：手工执行 Run 级解析重放。
 

@@ -7,8 +7,10 @@ describe("date presets", () => {
     expect(presetRange("week", now)?.[0].getDay()).toBe(1);
     expect(presetRange("month", now)?.[0].getDate()).toBe(1);
   });
-  it("includes today in recent-day ranges", () => {
+  it("uses exact rolling-hour ranges", () => {
     const range = presetRange("last7", now)!;
-    expect((range[1].getTime() - range[0].getTime() + 1) / 86_400_000).toBe(7);
+    expect((range[1].getTime() - range[0].getTime()) / 86_400_000).toBe(7);
+    const hours = presetRange("last24h", now)!;
+    expect((hours[1].getTime() - hours[0].getTime()) / 3_600_000).toBe(24);
   });
 });

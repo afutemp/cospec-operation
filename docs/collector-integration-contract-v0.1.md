@@ -36,7 +36,9 @@ cospec-telemetry ensure \
     "startOffset": 123,
     "endOffset": null,
     "status": "open"
-  }
+  },
+  "collector_version": "0.1.0",
+  "protocol_version": 1
 }
 ```
 
@@ -52,6 +54,14 @@ cospec-telemetry finish \
 
 `finish` 先记录当前完整 JSON 行结束边界，再立即尝试补传。相同状态重复调用幂等；不同状态重复结束返回 `run_finish_conflict`。结束边界保存后，即使上传暂时失败，后台仍会继续处理该边界内的 pending upload。
 
+## 正式产物同步
+
+```bash
+cospec-telemetry sync-artifacts --run-id <cospec-run-uuid> --manifest <absolute-manifest-path>
+```
+
+该命令只读取 manifest 已登记的正式文件，校验大小与 SHA-256 后冻结并持久入队。Cospec 的 `stage-end` 自动调用；持久化的 `run-finish` 重试流程会在发送终态前再次调用，工作流作者不需要单独管理。
+
 ## 状态与诊断
 
 ```bash
@@ -65,8 +75,8 @@ cospec-telemetry status
 ## 响应和退出码
 
 - 所有 CLI 结果都向 stdout 输出一个 JSON 对象；
-- 成功：`{"ok":true,"data":...}`，退出码 0；
-- 失败：`{"ok":false,"error":"stable_error_code"}`，退出码非 0；
+- 成功：`{"ok":true,"data":...,"collector_version":"...","protocol_version":1}`，退出码 0；
+- 失败：`{"ok":false,"error":"stable_error_code","collector_version":"...","protocol_version":1}`，退出码非 0；
 - 调用方按 `ok` 和 `error` 判断，不匹配完整文本输出；
 - JSONL 正文、token、请求头和堆栈不会进入响应。
 
@@ -76,6 +86,8 @@ cospec-telemetry status
 
 - 任一命令发现 daemon 不存在时会自动拉起用户级单例；
 - 后续命令通过本地 IPC 连接同一 daemon；
-- daemon 继承首次启动时的 Server URL、token、数据源根目录和扫描周期环境；
+- daemon 继承首次启动时的 Server URL、数据源根目录和扫描周期环境；Collector 上报无需 Token；
+- 响应中的版本来自实际处理命令的 daemon，而不是调用它的 CLI 外壳；调用方必须拒绝不支持或缺失的 `protocol_version`；
+- Collector 客户端可构建为单文件随 Cospec 分发；Collector、Cospec 插件各自保留版本号，不要求一一绑定，只绑定兼容协议版本；
 - 配置变化后，运维方应执行 `shutdown`，再由下一条命令重新拉起；
-- 默认后台扫描周期为 5 分钟，`ensure` 异步安排立即扫描，`finish` 立即扫描。
+- 默认后台扫描周期为 5 分钟，`ensure` 和 `sync-artifacts` 异步安排立即扫描，`finish` 立即扫描。

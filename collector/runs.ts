@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
-import type { AgentType, CollectorState, RunBinding } from "./types.js";
+import type { AgentType, CollectorState, RunBinding, WorkflowKind } from "./types.js";
 import { lastCompleteLineOffset, locateClaudeCodeSession, locateCodexSession, locateSubagents, type LocatedSession } from "./session.js";
 
 export class RunRegistry {
@@ -11,7 +11,7 @@ export class RunRegistry {
       : sessionsRoot;
   }
 
-  async ensure(state: CollectorState, agentType: AgentType, sessionId: string, runId: string): Promise<RunBinding> {
+  async ensure(state: CollectorState, agentType: AgentType, sessionId: string, runId: string, workflowKind?: WorkflowKind, workflowName?: string, actor?: { employeeId: string; displayName: string; proposerDept?: string }): Promise<RunBinding> {
     const existing = state.runs[runId];
     if (existing) {
       if (existing.agentType !== agentType || existing.agentSessionId !== sessionId) throw new Error("run_binding_conflict");
@@ -25,6 +25,8 @@ export class RunRegistry {
       schemaVersion: "0.1.0", cospecRunId: runId, agentType, agentSessionId: sessionId,
       sourceFileId: null, generation: null, startOffset: null, endOffset: null,
       startedAt: now, endedAt: null, status: "pending",
+      ...(workflowKind ? { workflowKind } : {}), ...(workflowName ? { workflowName } : {}),
+      ...(actor ? { actor } : {}),
     };
     if (located) {
       const file = state.files[located.path] ?? {

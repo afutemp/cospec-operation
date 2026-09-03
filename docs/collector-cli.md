@@ -31,7 +31,7 @@ node dist/collector/cli.js shutdown
 
 `status` 除 Run、文件游标和待确认上传外，还返回最近扫描、最近成功上传、连续失败、最近错误及恢复时间。持续历史记录位于状态目录的 `logs/collector.jsonl`，详见 [Collector 状态与本地滚动日志](collector-observability.md)。
 
-未配置 `COSPEC_TELEMETRY_SERVER_URL` 时，`scan` 将数据块写入状态目录的 `outbox/`，用于离线验证；配置 Server URL 和 Bearer Token 后，同一套扫描逻辑通过 HTTP 上传。未完成行不进入数据块，接收成功后才推进游标。没有活动 Run 时不会采集 JSONL；`finish` 边界之后的内容也不会上传。
+未配置 `COSPEC_TELEMETRY_SERVER_URL` 时，独立 Collector 将数据块写入状态目录的 `outbox/`，用于离线验证；Cospec 集成脚本会提供默认 Server URL，也允许环境变量覆盖。HTTP 上报无需 Token。未完成行不进入数据块，接收成功后才推进游标。没有活动 Run 时不会采集 JSONL；`finish` 边界之后的内容也不会上传。
 
 Collector daemon 在首次 `ensure`、`status`、`scan`、`finish` 或 `shutdown` 时自动拉起。用于真实上传时，必须在首次拉起前设置 Server URL 和 Token；变更配置后应先执行 `shutdown`，再用新环境重新拉起。
 

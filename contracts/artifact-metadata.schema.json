@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cospec.local/contracts/artifact-metadata-0.1.0.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "upload_id", "cospec_run_id", "skill", "attempt_id", "artifact_index", "artifact_role", "file_name", "logical_path", "content_type", "size_bytes", "sha256", "created_at"],
+  "properties": {
+    "schema_version": { "const": "0.1.0" },
+    "upload_id": { "type": "string", "format": "uuid" },
+    "cospec_run_id": { "type": "string", "format": "uuid" },
+    "skill": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "attempt_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$" },
+    "artifact_index": { "type": "integer", "minimum": 0 },
+    "artifact_role": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "file_name": { "type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[^/\\\\]+$" },
+    "logical_path": { "type": "string", "minLength": 9, "maxLength": 1000, "pattern": "^outputs/(?!.*(?:^|/)\\.\\.(?:/|$))[^\\u0000-\\u001f\\\\]+$" },
+    "content_type": { "type": "string", "minLength": 1, "maxLength": 150 },
+    "size_bytes": { "type": "integer", "minimum": 1, "maximum": 20971520 },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "created_at": { "type": "string", "format": "date-time" }
+  }
+}

@@ -11,19 +11,18 @@ npm run server
 
 默认监听 `127.0.0.1:4318`。可通过 `COSPEC_TELEMETRY_HOST` 和 `COSPEC_TELEMETRY_PORT` 修改。
 
-无需鉴权的 `GET /health/live` 用于判断进程存活，`GET /health/ready` 用于判断持久仓储可查询。它们只返回状态，不返回配置、路径或业务数据。上传和查询接口仍要求 Bearer Token。
+无需鉴权的 `GET /health/live` 用于判断进程存活，`GET /health/ready` 用于判断持久仓储可查询。JSONL、Run 事件和产物上传接口无需 Token；看板查询和管理接口仍要求登录 Token。
 
 ## 启动 Collector HTTP 上传
 
 ```bash
 COSPEC_TELEMETRY_SERVER_URL="http://127.0.0.1:4318" \
-COSPEC_TELEMETRY_BEARER_TOKEN="<test-token>" \
 node dist/collector/cli.js ensure \
   --session-id "$CODEX_SESSION_ID" \
   --run-id "<UUID>"
 ```
 
-配置 `COSPEC_TELEMETRY_SERVER_URL` 后使用真实 multipart HTTP；未配置时仍使用 POC-02 的本地 outbox 模拟接收端。Token 只用于 Authorization header。
+配置 `COSPEC_TELEMETRY_SERVER_URL` 后使用真实 multipart HTTP；未配置时仍使用 POC-02 的本地 outbox 模拟接收端。Collector 上报不需要配置 Token。
 
 ## 当前边界
 

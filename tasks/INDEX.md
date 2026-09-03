@@ -27,5 +27,24 @@
 | POC-22 | [汇总子代理使用与资源分布](POC-22-subagent-usage-summary.md) | 已完成 |
 | POC-23 | [统计上下文压缩次数与可得的上下文上限](POC-23-context-compaction.md) | 已完成（Claude Code 上限按决策保持不可得） |
 | POC-24 | [搭建 Web 运营看板并与服务端联调](POC-24-web-dashboard.md) | 当前环境通过（Windows 待验证） |
+| POC-25 | [将 Collector 集成进 Cospec 工作流](POC-25-cospec-collector-integration.md) | 当前 Linux 环境通过（Windows 待验证） |
+| POC-26 | [增加周度使用深度与 Skill 资源归属](POC-26-adoption-and-skill-resources.md) | 已完成 |
+| POC-27 | [增加 Skill 交互、无活动 Run 与版本对比](POC-27-operations-diagnostics.md) | 已完成 |
+| POC-28 | [增加工作流类型、终态与阶段进度](POC-28-workflow-lifecycle.md) | 已完成（Windows 待最终验收） |
+| POC-29 | [增加人员工号与姓名快照](POC-29-person-identity-snapshot.md) | 已完成（Windows 待最终验收） |
+| POC-30 | [接入 IPD proposer_dept 产线快照](POC-30-ipd-proposer-dept.md) | 已完成（Windows 待最终验收） |
+| POC-31 | [上传 Cospec manifest 登记的正式产物](POC-31-artifact-upload.md) | 当前 Linux 环境通过（Windows 待验证） |
+| POC-32 | [重构领导周报与重点 Skill 运营视图](POC-32-weekly-operations-dashboard.md) | 当前 Linux 环境通过（Windows 待验证） |
+| POC-33 | [增加 Run 下钻与组合过滤](POC-33-run-drilldown-and-filtering.md) | 当前 Linux 环境通过（Windows 待验证） |
+| POC-34 | [增加运营异常与专项分析](POC-34-operations-investigation.md) | 当前 Linux 环境通过（Windows 待验证） |
+| POC-35 | [补全同一人员和终端的缺失身份信息](POC-35-identity-backfill.md) | 当前 Linux 环境通过（Windows 待验证） |
+| POC-36 | [按新版信息架构重做运营概览](POC-36-overview-redesign.md) | 当前 Linux 环境通过（Windows 待验证） |
+| POC-37 | [匿名终端纳入活跃用户估算](POC-37-estimated-active-users.md) | 当前 Linux 环境通过（Windows 待验证） |
+| POC-38 | [重做工作流分析并移除旧产品页面](POC-38-workflow-analysis-redesign.md) | 当前 Linux 环境通过（Windows 待验证） |
+| POC-39 | [建设 SKILL 分析页面](POC-39-skill-analysis.md) | 当前 Linux 环境通过（Windows 待验证） |
+| POC-40 | [管理员下载原始 JSONL](POC-40-admin-jsonl-download.md) | 当前 Linux 环境通过（Windows 待验证） |
+| POC-41 | [建设推广使用页面](POC-41-adoption-analysis.md) | 当前 Linux 环境通过（Windows 待验证） |
+| POC-42 | [临时本地用户管理](POC-42-local-user-management.md) | 当前 Linux 环境通过（Windows 待验证） |
+| POC-43 | [上报接口取消 Token](POC-43-tokenless-ingest.md) | 当前 Linux 环境通过（Windows 待验证） |
 
-`POC-01/01A` 已冻结，`POC-02/03/04/05/06/07/09/10/11/13/14/15/16/17/18/19/20/22/23` 已完成；`POC-08/12/21/24` 当前 Linux 环境验收通过，Windows 实机项保持待验证。协议见 [upload-protocol-v0.1.md](../docs/upload-protocol-v0.1.md)、[collector-lifecycle-v0.1.md](../docs/collector-lifecycle-v0.1.md) 和 [Collector 调用契约 0.1](../docs/collector-integration-contract-v0.1.md)。JSON Schema 位于 `contracts/`。
+`POC-01/01A` 已冻结，`POC-02/03/04/05/06/07/09/10/11/13/14/15/16/17/18/19/20/22/23/26/27` 已完成；`POC-08/12/21/24/25/28/29/30/31` 当前 Linux 环境验收通过，Windows 实机项保持待验证。协议见 [upload-protocol-v0.1.md](../docs/upload-protocol-v0.1.md)、[artifact-upload-v0.1.md](../docs/artifact-upload-v0.1.md)、[collector-lifecycle-v0.1.md](../docs/collector-lifecycle-v0.1.md) 和 [Collector 调用契约 0.1](../docs/collector-integration-contract-v0.1.md)。JSON Schema 位于 `contracts/`。

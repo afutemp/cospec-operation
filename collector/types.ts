@@ -1,5 +1,13 @@
 export type AgentType = "codex" | "claude_code";
 export type RunStatus = "pending" | "open" | "completed" | "failed" | "interrupted";
+export type WorkflowKind = "large" | "small" | "custom";
+export interface RunEvent {
+  schema_version: "0.1.0"; event_id: string; cospec_run_id: string;
+  event_type: "run_started" | "stage_started" | "stage_finished" | "run_finished";
+  occurred_at: string; workflow_kind?: WorkflowKind; workflow_name?: string;
+  stage?: string; status?: "completed" | "failed" | "interrupted" | "skipped";
+  actor?: { employee_id: string; display_name: string; proposer_dept?: string };
+}
 
 export interface FileState {
   agentType?: AgentType;
@@ -32,6 +40,9 @@ export interface RunBinding {
   startedAt: string;
   endedAt: string | null;
   status: RunStatus;
+  workflowKind?: WorkflowKind;
+  workflowName?: string;
+  actor?: { employeeId: string; displayName: string; proposerDept?: string };
 }
 
 export interface CollectorState {
@@ -39,6 +50,19 @@ export interface CollectorState {
   files: Record<string, FileState>;
   runs: Record<string, RunBinding>;
   diagnostics?: CollectorDiagnostics;
+  pendingEvents?: RunEvent[];
+  artifacts?: Record<string, ArtifactState>;
+}
+
+export interface ArtifactMetadata {
+  schema_version: "0.1.0"; upload_id: string; cospec_run_id: string;
+  skill: string; attempt_id: string; artifact_index: number; artifact_role: string;
+  file_name: string; logical_path: string; content_type: string; size_bytes: number; sha256: string; created_at: string;
+}
+
+export interface ArtifactState {
+  key: string; metadata: ArtifactMetadata; spoolPath: string;
+  status: "pending" | "uploaded" | "rejected"; error?: string; uploadedAt?: string;
 }
 
 export interface CollectorDiagnostics {
@@ -56,13 +80,21 @@ export interface CollectorDiagnostics {
 }
 
 export type CollectorCommand =
-  | { type: "ensure"; agentType: AgentType; agentSessionId: string; cospecRunId: string }
+  | { type: "ensure"; agentType: AgentType; agentSessionId: string; cospecRunId: string; workflowKind?: WorkflowKind; workflowName?: string; actor?: { employeeId: string; displayName: string; proposerDept?: string } }
+  | { type: "event"; event: RunEvent }
+  | { type: "sync_artifacts"; cospecRunId: string; manifestPath: string }
   | { type: "finish"; cospecRunId: string; status: "completed" | "failed" | "interrupted" }
   | { type: "status" }
   | { type: "scan" }
   | { type: "shutdown" };
 
-export interface CommandResponse { ok: boolean; data?: unknown; error?: string }
+export interface CommandResponse {
+  ok: boolean;
+  data?: unknown;
+  error?: string;
+  collectorVersion?: string;
+  protocolVersion?: number;
+}
 
 export interface ChunkMetadata {
   schema_version: "0.1.0";

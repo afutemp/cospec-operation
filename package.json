@@ -16,6 +16,7 @@
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json && npm run web:build",
     "build:package": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.pack.json && npm run web:build",
+    "build:collector-bundle": "npm run build:package && esbuild dist/collector/cli.js --bundle --platform=node --format=esm --target=node24 --outfile=dist/cospec-collector.mjs && node --check dist/cospec-collector.mjs",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test dist/**/*.test.js && npm run web:test",
     "web:dev": "vite --config web/vite.config.ts",
@@ -33,6 +34,7 @@
     "@vue/test-utils": "^2.5.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
+    "esbuild": "^0.28.2",
     "jsdom": "^29.1.1",
     "typescript": "^5.9.0",
     "unplugin-vue-components": "^32.1.0",
