@@ -332,6 +332,36 @@ test("Skill active duration excludes only explicit human reply waits", async () 
   repository.close();
 });
 
+test("structured Skill events provide intervals while JSONL provides waits and resources", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cospec-structured-skill-events-"));
+  const runId = randomUUID();
+  const bytes = Buffer.from([
+    JSON.stringify({ type: "assistant", timestamp: "2026-09-01T01:00:10.000Z", message: { role: "assistant", usage: { input_tokens: 10, output_tokens: 2 }, content: [
+      { type: "text", text: "请确认" }, { type: "tool_use", id: "question", name: "AskUserQuestion" },
+    ] } }),
+    JSON.stringify({ type: "user", timestamp: "2026-09-01T01:00:20.000Z", message: { role: "user", content: [
+      { type: "tool_result", tool_use_id: "question", is_error: false, content: "not a human reply" },
+    ] } }),
+    JSON.stringify({ type: "user", timestamp: "2026-09-01T01:01:10.000Z", message: { role: "user", content: "采用推荐选项" } }),
+    JSON.stringify({ type: "assistant", timestamp: "2026-09-01T01:01:15.000Z", message: { role: "assistant", usage: { input_tokens: 5, output_tokens: 1 }, content: [] } }),
+  ].join("\n") + "\n");
+  const value = metadata(bytes, runId); value.source_type = "claude_code_jsonl"; value.environment.agent_type = "claude_code";
+  const repository = await DurableChunkRepository.open(root);
+  await repository.accept(value, bytes); await new ParserWorker(repository).runPending();
+  repository.acceptRunEvent({ schema_version: "0.1.0", event_id: `${runId}:skill:start:1234abcd`, cospec_run_id: runId,
+    event_type: "skill_started", occurred_at: "2026-09-01T01:00:00.000Z", skill: "requirement", execution_id: "1234abcd" });
+  repository.acceptRunEvent({ schema_version: "0.1.0", event_id: `${runId}:skill:end:1234abcd`, cospec_run_id: runId,
+    event_type: "skill_finished", occurred_at: "2026-09-01T01:01:20.000Z", skill: "requirement", execution_id: "1234abcd", status: "completed" });
+  const facts = repository.getRunFacts(runId) as { attribution: { skill: string }; skills: Record<string, any> };
+  assert.equal(facts.attribution.skill, "structured_skill_events");
+  assert.deepEqual({ executions: facts.skills.executions, completed: facts.skills.completed, measured: facts.skills.measured_executions },
+    { executions: 1, completed: 1, measured: 1 });
+  assert.deepEqual({ durationMs: facts.skills.items[0].durationMs, elapsedMs: facts.skills.items[0].elapsedMs,
+    waitingForUserMs: facts.skills.items[0].waitingForUserMs, inputTokens: facts.skills.items[0].resources.self.tokens.input_tokens },
+    { durationMs: 20000, elapsedMs: 80000, waitingForUserMs: 60000, inputTokens: 15 });
+  repository.close();
+});
+
 test("Skill resources expose inclusive and non-duplicated self attribution for nested Skills", async () => {
   const root = await mkdtemp(join(tmpdir(), "cospec-nested-skill-resources-")); const runId = randomUUID();
   const marker = (timestamp: string, id: string, value: string) => JSON.stringify({ type: "user", timestamp,

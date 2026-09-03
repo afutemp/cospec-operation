@@ -51,7 +51,7 @@ GET /api/v1/runs/:runId/facts
 
 返回活动解析器版本的消息、Token、工具调用/结果和宿主记录时间跨度。工具状态包含明确成功、明确失败、不可判定、可判定数量和 `status_coverage`；明确失败是下界，不能脱离覆盖率解释。工具耗时包含可计算数量、覆盖率、通常耗时、累计使用量和去除并发重叠后的实际经过时间。字段与指标边界见 [宿主资源与工具事实 0.2](host-resource-facts-v0.2.md)。
 
-`skills` 返回当前 Run 中由显式 START/END 标记识别的 Skill 执行：执行总数、成功/失败/中断/未结束数量、时长覆盖率、累计活跃时长、P50/P90、等待用户时长、资源归属、按 Skill 汇总及单次执行明细。单次明细中的 `elapsedMs` 是 START 到 END 总历时，`waitingForUserMs` 是其中有明确对话边界的用户回复等待，`durationMs` 是两者相减后的活跃执行时长。`resources.inclusive` 包含嵌套子 Skill，`resources.self` 将事实只归到最内层完整 Skill；按 Skill 汇总使用 `self`，避免父子重复累计。`resourceAttribution.attribution_coverage` 说明具有时间戳的资源事实中有多少落入完整 Skill 区间。Claude Code `tool_result`、`isMeta` Skill 注入文本等机器记录不算用户回复；缺少任一 Skill 边界或时间倒序时不生成时长或强行归属资源。`attribution.skill=explicit_start_end_markers` 表示已经取得显式标记，`unavailable` 表示当前 Run 没有标记。
+`skills` 返回当前 Run 中由结构化 SKILL 事件识别的执行：执行总数、成功/失败/中断/未结束数量、时长覆盖率、累计活跃时长、P50/P90、等待用户时长、资源归属、按 SKILL 汇总及单次执行明细。单次明细中的 `elapsedMs` 是开始到结束总历时，`waitingForUserMs` 是其中有明确对话边界的用户回复等待，`durationMs` 是两者相减后的活跃执行时长。`resources.inclusive` 包含嵌套子 SKILL，`resources.self` 将事实只归到最内层完整 SKILL；按 SKILL 汇总使用 `self`，避免父子重复累计。`resourceAttribution.attribution_coverage` 说明具有时间戳的 JSONL 资源事实中有多少落入完整 SKILL 区间。Claude Code `tool_result`、`isMeta` SKILL 注入文本等机器记录不算用户回复；缺少任一边界或时间倒序时不生成时长或强行归属资源。`attribution.skill=structured_skill_events` 表示使用结构化事件，`explicit_start_end_markers` 表示兼容旧 JSONL 文本标记，`unavailable` 表示当前 Run 没有可用边界。相同 execution ID 同时存在两种来源时优先使用结构化事件，避免重复统计。
 
 新版 Collector 上传子代理关联后，响应中的 `subagents` 还会返回子代理数量、已解析数量、最大层级、消息、Token、工具和模型汇总，以及不含正文和任务名的父子会话列表。详细规则见 [Codex 与 Claude Code 子代理采集](subagent-collection.md)。
 

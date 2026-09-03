@@ -363,7 +363,7 @@ export class DurableChunkRepository
           skipped: 0,
         };
         if (event.event_type === "stage_started") stage.started += 1;
-        if (event.event_type === "stage_finished" && event.status)
+        if (event.event_type === "stage_finished" && event.status && event.status !== "orphan")
           stage[event.status] += 1;
         stages.set(event.stage, stage);
       }
@@ -429,7 +429,7 @@ export class DurableChunkRepository
           skipped: 0,
         };
         if (event.event_type === "stage_started") stage.started += 1;
-        if (event.event_type === "stage_finished" && event.status)
+        if (event.event_type === "stage_finished" && event.status && event.status !== "orphan")
           stage[event.status] += 1;
         stages.set(event.stage, stage);
       }
@@ -1380,6 +1380,8 @@ export class DurableChunkRepository
       ORDER BY c.start_offset,f.record_index,f.item_index,f.marker_index`,
       )
       .all(runId, version) as Array<Record<string, unknown>>;
+    const structuredSkillRows = this.getStructuredSkillRows(runId).map(({ cospec_run_id: _runId, ...row }) => row);
+    const effectiveSkillRows = preferStructuredSkillRows(skillMarkerRows, structuredSkillRows);
     const turnEventRows = this.database
       .prepare(
         `SELECT f.kind,f.timestamp FROM turn_event_facts f JOIN chunks c ON c.upload_id=f.upload_id
@@ -1393,7 +1395,7 @@ export class DurableChunkRepository
       WHERE c.cospec_run_id=? AND json_extract(c.metadata_json,'$.session.role')='subagent' GROUP BY agent_session_id`,
       )
       .all(version, runId) as Array<Record<string, unknown>>;
-    const skills = summarizeSkillExecutions(skillMarkerRows, turnEventRows, {
+    const skills = summarizeSkillExecutions(effectiveSkillRows, turnEventRows, {
       tokenRows: tokenFactRows,
       callRows: toolCallTimes,
       resultRows: toolResultTimes,
@@ -1438,8 +1440,10 @@ export class DurableChunkRepository
       skills,
       attribution: {
         run: "explicit_jsonl_offset_interval",
-        skill: skillMarkerRows.length
-          ? "explicit_start_end_markers"
+        skill: structuredSkillRows.length
+          ? "structured_skill_events"
+          : skillMarkerRows.length
+            ? "explicit_start_end_markers"
           : "unavailable",
       },
       subagents: this.getRunSubagentFacts(runId, version),
@@ -1469,6 +1473,18 @@ export class DurableChunkRepository
         },
       },
     };
+  }
+
+  private getStructuredSkillRows(runId?: string): Array<Record<string, unknown>> {
+    const rows = this.database.prepare(`SELECT cospec_run_id,payload_json FROM run_events
+      WHERE event_type IN ('skill_started','skill_finished') ${runId ? "AND cospec_run_id=?" : ""}
+      ORDER BY cospec_run_id,occurred_at,event_id`).all(...(runId ? [runId] : [])) as Array<Record<string, unknown>>;
+    return rows.map((row) => {
+      const event = JSON.parse(String(row.payload_json)) as RunEvent;
+      return { cospec_run_id: String(row.cospec_run_id), phase: event.event_type === "skill_started" ? "start" : "end",
+        skill: event.skill, execution_id: event.execution_id, timestamp: event.occurred_at,
+        status: event.event_type === "skill_finished" ? structuredSkillStatus(event.status) : null };
+    });
   }
 
   private getRunSubagentFacts(
@@ -1612,6 +1628,7 @@ export class DurableChunkRepository
       ORDER BY c.cospec_run_id,c.start_offset,f.record_index,f.item_index,f.marker_index`,
       )
       .all() as Array<Record<string, unknown>>;
+    const effectiveSkillRows = preferStructuredSkillRows(skillMarkerRows, this.getStructuredSkillRows());
     const turnEventRows = this.database
       .prepare(
         `SELECT c.cospec_run_id,f.kind,f.timestamp
@@ -1763,7 +1780,7 @@ export class DurableChunkRepository
     const selectedToolResults = toolResultRows.filter((row) =>
       runIds.has(String(row.cospec_run_id)),
     );
-    const selectedSkillMarkers = skillMarkerRows.filter((row) =>
+    const selectedSkillMarkers = effectiveSkillRows.filter((row) =>
       runIds.has(String(row.cospec_run_id)),
     );
     const selectedArtifacts = artifactRows.filter((row) =>
@@ -2384,6 +2401,23 @@ interface SkillExecution {
   resources?: { inclusive: SkillResourceSummary; self: SkillResourceSummary };
 }
 
+function structuredSkillStatus(status: RunEvent["status"]): "ok" | "failed" | "interrupted" | "orphan" {
+  if (status === "completed") return "ok";
+  if (status === "failed" || status === "interrupted" || status === "orphan") return status;
+  return "interrupted";
+}
+
+function preferStructuredSkillRows(
+  markerRows: Array<Record<string, unknown>>,
+  structuredRows: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  const structuredPhases = new Set(structuredRows.map((row) =>
+    `${String(row.cospec_run_id ?? "")}\0${String(row.skill)}\0${String(row.execution_id)}\0${String(row.phase)}`));
+  return [...markerRows.filter((row) => !structuredPhases.has(
+    `${String(row.cospec_run_id ?? "")}\0${String(row.skill)}\0${String(row.execution_id)}\0${String(row.phase)}`)), ...structuredRows]
+    .sort((left, right) => (Date.parse(String(left.timestamp)) || 0) - (Date.parse(String(right.timestamp)) || 0));
+}
+
 interface SkillResourceFacts {
   tokenRows: Array<Record<string, unknown>>;
   callRows: Array<Record<string, unknown>>;
@@ -2562,7 +2596,7 @@ function summarizeSkillExecutions(
   }
   return {
     ...summarize(executions),
-    semantics: "explicit_marker_interval_excluding_user_wait",
+    semantics: "skill_event_interval_excluding_user_wait",
     resourceAttribution: resourceCoverage,
     bySkill: Object.fromEntries(
       [...grouped]

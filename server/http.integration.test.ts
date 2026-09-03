@@ -55,9 +55,16 @@ test("workflow lifecycle events are accepted idempotently and queryable", async 
       });
       assert.equal(response.status, 200);
     }
+    const skill = { schema_version: "0.1.0", event_id: `${runId}:skill:start:1234abcd`, cospec_run_id: runId,
+      event_type: "skill_started", occurred_at: new Date().toISOString(), skill: "spec-journey-user", execution_id: "1234abcd" };
+    for (let index = 0; index < 2; index += 1) {
+      const accepted = await fetch(`${address}/api/v1/run-events`, { method: "POST",
+        headers: { "content-type": "application/json" }, body: JSON.stringify(skill) });
+      assert.equal(accepted.status, 200);
+    }
     const response = await fetch(`${address}/api/v1/runs/${runId}/events`, { headers: { authorization: `Bearer ${TOKEN}` } });
     assert.equal(response.status, 200);
-    assert.deepEqual((await response.json() as { items: unknown[] }).items.length, 1);
+    assert.deepEqual((await response.json() as { items: unknown[] }).items.length, 2);
     assert.deepEqual(repository.getRunEvents(runId)[0]?.actor, { employee_id: "63027", display_name: "测试规划员", proposer_dept: "研发体系/工程技术部" });
   } finally { await app.close(); }
 });

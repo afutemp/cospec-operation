@@ -3,9 +3,10 @@ export type RunStatus = "pending" | "open" | "completed" | "failed" | "interrupt
 export type WorkflowKind = "large" | "small" | "custom";
 export interface RunEvent {
   schema_version: "0.1.0"; event_id: string; cospec_run_id: string;
-  event_type: "run_started" | "stage_started" | "stage_finished" | "run_finished";
+  event_type: "run_started" | "stage_started" | "stage_finished" | "skill_started" | "skill_finished" | "run_finished";
   occurred_at: string; workflow_kind?: WorkflowKind; workflow_name?: string;
-  stage?: string; status?: "completed" | "failed" | "interrupted" | "skipped";
+  stage?: string; status?: "completed" | "failed" | "interrupted" | "skipped" | "orphan";
+  skill?: string; execution_id?: string;
   actor?: { employee_id: string; display_name: string; proposer_dept?: string };
 }
 

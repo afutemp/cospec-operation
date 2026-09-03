@@ -333,10 +333,15 @@ function validRunEvent(value: unknown): value is RunEvent {
   if (!value || typeof value !== "object") return false;
   const event = value as Partial<RunEvent>;
   if (event.schema_version !== "0.1.0" || !event.event_id || !event.cospec_run_id || !event.occurred_at || !Number.isFinite(Date.parse(event.occurred_at))) return false;
-  if (!event.event_type || !["run_started", "stage_started", "stage_finished", "run_finished"].includes(event.event_type)) return false;
+  if (!event.event_type || !["run_started", "stage_started", "stage_finished", "skill_started", "skill_finished", "run_finished"].includes(event.event_type)) return false;
   if (event.actor && (!/^[A-Za-z0-9._-]{1,64}$/.test(event.actor.employee_id) || !event.actor.display_name || event.actor.display_name.length > 100 || /[\u0000-\u001f]/.test(event.actor.display_name) ||
     (event.actor.proposer_dept !== undefined && (!event.actor.proposer_dept || event.actor.proposer_dept.length > 200 || /[\u0000-\u001f]/.test(event.actor.proposer_dept))))) return false;
   if (event.event_type === "run_started") return !!event.workflow_name && !!event.workflow_kind && ["large", "small", "custom"].includes(event.workflow_kind);
-  if (event.event_type.startsWith("stage_")) return !!event.stage && (event.event_type !== "stage_finished" || !!event.status);
-  return !!event.status;
+  if (event.event_type.startsWith("stage_")) return !!event.stage && (event.event_type === "stage_started"
+    ? event.status === undefined : !!event.status && ["completed", "failed", "interrupted", "skipped"].includes(event.status));
+  if (event.event_type.startsWith("skill_")) return !!event.skill && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(event.skill) &&
+    !!event.execution_id && /^[A-Za-z0-9]{8}$/.test(event.execution_id) &&
+    (event.event_type === "skill_started" ? event.status === undefined
+      : !!event.status && ["completed", "failed", "interrupted", "orphan"].includes(event.status));
+  return !!event.status && ["completed", "failed", "interrupted"].includes(event.status);
 }

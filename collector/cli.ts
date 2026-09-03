@@ -74,13 +74,17 @@ async function main(): Promise<void> {
     return;
   }
   if (command === "event") {
-    const eventType = required("event-type") as "stage_started" | "stage_finished";
-    if (!["stage_started", "stage_finished"].includes(eventType)) throw new Error("invalid_option:event-type");
-    const runId = uuid(required("run-id"), "run-id"); const stage = required("stage");
+    const eventType = required("event-type") as "stage_started" | "stage_finished" | "skill_started" | "skill_finished";
+    if (!["stage_started", "stage_finished", "skill_started", "skill_finished"].includes(eventType)) throw new Error("invalid_option:event-type");
+    const runId = uuid(required("run-id"), "run-id");
     const statusValue = option("status");
-    await sendWithAutostart({ type: "event", event: { schema_version: "0.1.0", event_id: required("event-id"), cospec_run_id: runId,
-      event_type: eventType, occurred_at: option("occurred-at") ?? new Date().toISOString(), stage,
-      ...(statusValue ? { status: stageStatus(statusValue) } : {}) } }); return;
+    const common = { schema_version: "0.1.0" as const, event_id: required("event-id"), cospec_run_id: runId,
+      occurred_at: option("occurred-at") ?? new Date().toISOString() };
+    const event = eventType.startsWith("stage_")
+      ? { ...common, event_type: eventType, stage: required("stage"), ...(statusValue ? { status: stageStatus(statusValue) } : {}) }
+      : { ...common, event_type: eventType, skill: required("skill"), execution_id: executionId(required("execution-id")),
+          ...(statusValue ? { status: skillStatus(statusValue) } : {}) };
+    await sendWithAutostart({ type: "event", event }); return;
   }
   if (command === "finish") {
     const status = finishStatus(option("status") ?? "completed");
@@ -112,6 +116,16 @@ function finishStatus(value: string): "completed" | "failed" | "interrupted" {
 function stageStatus(value: string): "completed" | "failed" | "interrupted" | "skipped" {
   if (value === "skipped") return value;
   return finishStatus(value);
+}
+
+function skillStatus(value: string): "completed" | "failed" | "interrupted" | "orphan" {
+  if (value === "orphan") return value;
+  return finishStatus(value);
+}
+
+function executionId(value: string): string {
+  if (!/^[A-Za-z0-9]{8}$/.test(value)) throw new Error("invalid_option:execution-id");
+  return value;
 }
 
 function uuid(value: string, name: string): string {
