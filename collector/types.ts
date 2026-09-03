@@ -3,10 +3,15 @@ export type RunStatus = "pending" | "open" | "completed" | "failed" | "interrupt
 export type WorkflowKind = "large" | "small" | "custom";
 export interface RunEvent {
   schema_version: "0.1.0"; event_id: string; cospec_run_id: string;
-  event_type: "run_started" | "stage_started" | "stage_finished" | "skill_started" | "skill_finished" | "run_finished";
+  event_type: "run_started" | "stage_started" | "stage_finished" | "skill_started" | "skill_finished" | "knowledge_query_finished" | "run_finished";
   occurred_at: string; workflow_kind?: WorkflowKind; workflow_name?: string;
   stage?: string; status?: "completed" | "failed" | "interrupted" | "skipped" | "orphan";
   skill?: string; execution_id?: string;
+  query_id?: string; kb_name?: string; kb_version?: string; kb_revision?: string;
+  query_status?: "completed" | "degraded" | "failed" | "incomplete";
+  query_source?: "workflow" | "user"; consumer_skill?: string;
+  answerability?: "answerable" | "partially_answerable" | "unanswerable" | "conflicted";
+  hit_count?: number; citation_count?: number; warning_count?: number;
   actor?: { employee_id: string; display_name: string; proposer_dept?: string };
 }
 

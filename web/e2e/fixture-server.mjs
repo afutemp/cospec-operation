@@ -33,6 +33,7 @@ await repository.acceptArtifact({
   sha256: createHash("sha256").update(artifactBytes).digest("hex"), created_at: now,
 }, artifactBytes);
 repository.acceptRunEvent({ schema_version: "0.1.0", event_id: `${runId}:run_started`, cospec_run_id: runId, event_type: "run_started", occurred_at: now, workflow_kind: "large", workflow_name: "large-requirement-workflow", actor: { employee_id: "63027", display_name: "测试规划员", proposer_dept: "研发体系/工程技术部" } });
+repository.acceptRunEvent({ schema_version: "0.1.0", event_id: `${runId}:knowledge-query:q1`, cospec_run_id: runId, event_type: "knowledge_query_finished", occurred_at: at(-60_000), query_id: "q1", query_status: "degraded", kb_name: "桌面云产品知识库", kb_version: "2026.09", kb_revision: "sha256:abc", query_source: "workflow", consumer_skill: "spec-clarify-requirement", answerability: "partially_answerable", hit_count: 4, citation_count: 2, warning_count: 1 });
 repository.acceptRunEvent({ schema_version: "0.1.0", event_id: `${runId}:run_finished`, cospec_run_id: runId, event_type: "run_finished", occurred_at: at(-500), status: "completed" });
 await new ParserWorker(repository).runPending();
 const app = await createIngestApp({ bearerToken: "e2e-token", adminBearerToken: "e2e-admin-token", repository, queryRepository: repository });

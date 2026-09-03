@@ -12,6 +12,7 @@ export const router = createRouter({
     { path: "/", component: () => import("./views/OverviewView.vue") },
     { path: "/workflows", component: () => import("./views/RunsView.vue") },
     { path: "/skills", component: () => import("./views/SkillsView.vue") },
+    { path: "/knowledge", component: () => import("./views/KnowledgeView.vue") },
     { path: "/adoption", component: () => import("./views/AdoptionView.vue") },
     { path: "/users", component: () => import("./views/UsersView.vue") },
     {

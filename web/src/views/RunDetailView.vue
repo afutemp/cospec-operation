@@ -25,6 +25,7 @@ const tab = ref("workflow");
 const detailTabs = [
   { value: "workflow", label: "执行概览" },
   { value: "skills", label: "SKILL 执行" },
+  { value: "knowledge", label: "知识库查询" },
   { value: "tools", label: "工具调用" },
   { value: "artifacts", label: "交付产物" },
   { value: "resources", label: "资源消耗" },
@@ -68,6 +69,8 @@ const facts = computed(() => queries.value[1]?.data ?? {});
 const chunks = computed(() => queries.value[2]?.data?.items ?? []);
 const replays = computed(() => queries.value[3]?.data?.items ?? []);
 const events = computed(() => queries.value[4]?.data?.items ?? []);
+const knowledgeEvents = computed(() => events.value.filter((item:any) => item.event_type === "knowledge_query_finished"));
+const workflowEvents = computed(() => events.value.filter((item:any) => item.event_type !== "knowledge_query_finished"));
 const artifacts = computed(() => queries.value[5]?.data?.items ?? []);
 const isAdmin = computed(() => queries.value[6]?.data?.role === "admin");
 const rawSources = computed(() => queries.value[7]?.data?.items ?? []);
@@ -313,7 +316,7 @@ const workflowStatusLabel: Record<string, string> = {
           </div></el-tab-pane
         >
         <el-tab-pane label="执行概览" name="workflow"
-          ><el-table :data="events" size="small"
+          ><el-table :data="workflowEvents" size="small"
             ><el-table-column label="时间"
               ><template #default="{ row }">{{
                 datetime(row.occurred_at)
@@ -334,10 +337,24 @@ const workflowStatusLabel: Record<string, string> = {
               label="阶段"
               min-width="180" /><el-table-column prop="status" label="结果"
           /></el-table>
-          <div v-if="!events.length" class="empty">
+          <div v-if="!workflowEvents.length" class="empty">
             当前 Run 没有工作流进度事件
           </div></el-tab-pane
         >
+        <el-tab-pane label="知识库查询" name="knowledge">
+          <el-table :data="knowledgeEvents" size="small">
+            <el-table-column label="时间" width="175"><template #default="{ row }">{{ datetime(row.occurred_at) }}</template></el-table-column>
+            <el-table-column prop="kb_name" label="知识库" min-width="150" />
+            <el-table-column prop="kb_version" label="发布版本" min-width="120" />
+            <el-table-column prop="consumer_skill" label="消费位置" min-width="190" />
+            <el-table-column prop="query_status" label="执行状态" width="110" />
+            <el-table-column prop="answerability" label="可回答性" width="150" />
+            <el-table-column prop="hit_count" label="命中" width="75" />
+            <el-table-column prop="citation_count" label="引用" width="75" />
+            <el-table-column prop="warning_count" label="告警" width="75" />
+          </el-table>
+          <div v-if="!knowledgeEvents.length" class="empty">当前 Run 没有知识库查询记录</div>
+        </el-tab-pane>
         <el-tab-pane label="资源消耗" name="resources"
           ><h3>消息与 Token</h3>
           <div class="facts-grid">

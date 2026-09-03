@@ -278,6 +278,14 @@ export async function createIngestApp(options: IngestOptions): Promise<FastifyIn
         [query.employeeId, query.proposerDept].some((value) => value !== undefined && (value.length === 0 || value.length > 200))) return reply.code(400).send({ error: "invalid_filter" });
       return reply.send(queryRepository.getWorkflowSummary?.(query) ?? { total: 0, by_kind: {}, by_status: {}, completion_rate: null, stages: [] });
     });
+    app.get("/api/v1/summaries/knowledge", async (request, reply) => {
+      if (!requestAuthorized(request.headers.authorization)) return reply.code(401).send({ error: "unauthorized" });
+      const query = request.query as Record<string, string | undefined>;
+      if (Object.keys(query).some((key) => !["from", "to"].includes(key)) ||
+        (query.from && !validDate(query.from)) || (query.to && !validDate(query.to)) ||
+        (query.from && query.to && Date.parse(query.from) > Date.parse(query.to))) return reply.code(400).send({ error: "invalid_filter" });
+      return reply.send(queryRepository.getKnowledgeSummary?.(query) ?? { total: 0, runs: 0, items: [] });
+    });
   }
   app.setNotFoundHandler((request, reply) => {
     if (request.method === "GET" && !request.url.startsWith("/api/") && !request.url.startsWith("/health/") && !request.url.startsWith("/assets/")) {
@@ -333,7 +341,7 @@ function validRunEvent(value: unknown): value is RunEvent {
   if (!value || typeof value !== "object") return false;
   const event = value as Partial<RunEvent>;
   if (event.schema_version !== "0.1.0" || !event.event_id || !event.cospec_run_id || !event.occurred_at || !Number.isFinite(Date.parse(event.occurred_at))) return false;
-  if (!event.event_type || !["run_started", "stage_started", "stage_finished", "skill_started", "skill_finished", "run_finished"].includes(event.event_type)) return false;
+  if (!event.event_type || !["run_started", "stage_started", "stage_finished", "skill_started", "skill_finished", "knowledge_query_finished", "run_finished"].includes(event.event_type)) return false;
   if (event.actor && (!/^[A-Za-z0-9._-]{1,64}$/.test(event.actor.employee_id) || !event.actor.display_name || event.actor.display_name.length > 100 || /[\u0000-\u001f]/.test(event.actor.display_name) ||
     (event.actor.proposer_dept !== undefined && (!event.actor.proposer_dept || event.actor.proposer_dept.length > 200 || /[\u0000-\u001f]/.test(event.actor.proposer_dept))))) return false;
   if (event.event_type === "run_started") return !!event.workflow_name && !!event.workflow_kind && ["large", "small", "custom"].includes(event.workflow_kind);
@@ -343,5 +351,12 @@ function validRunEvent(value: unknown): value is RunEvent {
     !!event.execution_id && /^[A-Za-z0-9]{8}$/.test(event.execution_id) &&
     (event.event_type === "skill_started" ? event.status === undefined
       : !!event.status && ["completed", "failed", "interrupted", "orphan"].includes(event.status));
+  if (event.event_type === "knowledge_query_finished") return !!event.query_id && event.query_id.length <= 128 &&
+    !!event.kb_name && event.kb_name.length <= 128 && !!event.kb_revision && event.kb_revision.length <= 128 &&
+    !!event.query_status && ["completed", "degraded", "failed", "incomplete"].includes(event.query_status) &&
+    (!event.kb_version || event.kb_version.length <= 128) && ["workflow", "user"].includes(event.query_source ?? "") &&
+    (!event.consumer_skill || /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(event.consumer_skill)) &&
+    (!event.answerability || ["answerable", "partially_answerable", "unanswerable", "conflicted"].includes(event.answerability)) &&
+    [event.hit_count, event.citation_count, event.warning_count].every((count) => Number.isInteger(count) && Number(count) >= 0);
   return !!event.status && ["completed", "failed", "interrupted"].includes(event.status);
 }

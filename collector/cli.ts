@@ -86,6 +86,41 @@ async function main(): Promise<void> {
           ...(statusValue ? { status: skillStatus(statusValue) } : {}) };
     await sendWithAutostart({ type: "event", event }); return;
   }
+  if (command === "knowledge-query") {
+    const runId = uuid(required("run-id"), "run-id");
+    const answerability = option("answerability");
+    if (answerability && !["answerable", "partially_answerable", "unanswerable", "conflicted"].includes(answerability))
+      throw new Error("invalid_option:answerability");
+    const source = option("query-source") ?? "workflow";
+    const queryStatus = option("query-status") ?? "completed";
+    if (!["completed", "degraded", "failed", "incomplete"].includes(queryStatus)) throw new Error("invalid_option:query-status");
+    const kbVersion = option("kb-version");
+    const consumerSkill = option("consumer-skill");
+    if (!['workflow', 'user'].includes(source)) throw new Error("invalid_option:query-source");
+    const count = (name: string) => {
+      const value = Number(required(name));
+      if (!Number.isInteger(value) || value < 0) throw new Error(`invalid_option:${name}`);
+      return value;
+    };
+    const queryId = required("query-id");
+    const event = {
+      schema_version: "0.1.0" as const,
+      event_id: `${runId}:knowledge-query:${queryId}`,
+      cospec_run_id: runId,
+      occurred_at: option("occurred-at") ?? new Date().toISOString(),
+      event_type: "knowledge_query_finished" as const,
+      query_id: queryId,
+      query_status: queryStatus as "completed" | "degraded" | "failed" | "incomplete",
+      kb_name: required("kb-name"),
+      ...(kbVersion ? { kb_version: kbVersion } : {}),
+      kb_revision: required("kb-revision"),
+      query_source: source as "workflow" | "user",
+      ...(consumerSkill ? { consumer_skill: consumerSkill } : {}),
+      ...(answerability ? { answerability: answerability as "answerable" | "partially_answerable" | "unanswerable" | "conflicted" } : {}),
+      hit_count: count("hit-count"), citation_count: count("citation-count"), warning_count: count("warning-count"),
+    };
+    await sendWithAutostart({ type: "event", event }); return;
+  }
   if (command === "finish") {
     const status = finishStatus(option("status") ?? "completed");
     await sendWithAutostart({ type: "finish", cospecRunId: uuid(required("run-id"), "run-id"), status });
@@ -99,7 +134,7 @@ async function main(): Promise<void> {
     await sendWithAutostart({ type: command });
     return;
   }
-  throw new Error("usage: cospec-telemetry <ensure|event|sync-artifacts|finish|scan|status|shutdown> [options]");
+  throw new Error("usage: cospec-telemetry <ensure|event|knowledge-query|sync-artifacts|finish|scan|status|shutdown> [options]");
 }
 
 function workflowKindOption(value: string): WorkflowKind { if (["large", "small", "custom"].includes(value)) return value as WorkflowKind; throw new Error("invalid_option:workflow-kind"); }

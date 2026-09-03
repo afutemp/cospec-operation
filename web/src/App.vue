@@ -35,6 +35,9 @@ watch(auth.token, (value) => {
         <el-menu-item index="/skills"
           ><el-icon><Histogram /></el-icon><span>SKILL 分析</span></el-menu-item
         >
+        <el-menu-item index="/knowledge"
+          ><el-icon><Collection /></el-icon><span>知识库分析</span></el-menu-item
+        >
         <el-menu-item index="/adoption"
           ><el-icon><UserFilled /></el-icon><span>推广使用</span></el-menu-item
         >
@@ -49,6 +52,6 @@ watch(auth.token, (value) => {
 </template>
 
 <script lang="ts">
-import { DataAnalysis, Histogram, List, Setting, UserFilled } from "@element-plus/icons-vue";
-export default { components: { DataAnalysis, Histogram, List, Setting, UserFilled } };
+import { Collection, DataAnalysis, Histogram, List, Setting, UserFilled } from "@element-plus/icons-vue";
+export default { components: { Collection, DataAnalysis, Histogram, List, Setting, UserFilled } };
 </script>

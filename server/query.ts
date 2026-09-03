@@ -34,5 +34,6 @@ export interface QueryRepository {
   getRunRawSource(runId: string, sourceFileId: string, generation: number): Promise<Buffer | null>;
   getRunUsageSummary(filters: RunUsageFilters): Record<string, unknown>;
   getRunEvents?(runId: string): import("../collector/types.js").RunEvent[];
+  getKnowledgeSummary?(filters?: { from?: string; to?: string }): Record<string, unknown>;
   getWorkflowSummary?(filters?: { from?: string; to?: string; employeeId?: string; proposerDept?: string }): Record<string, unknown>;
 }

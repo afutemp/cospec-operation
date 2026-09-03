@@ -106,6 +106,14 @@ test("operator can authenticate, inspect overview and open a Run", async ({
   await expect(page.getByRole("dialog", { name: "研发体系/工程技术部" }).getByText("测试规划员", { exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
 
+  // 知识库分析：查看查询规模、可回答性和实际消费位置。
+  await page.getByRole("menuitem", { name: "知识库分析" }).click();
+  await expect(page.getByRole("heading", { name: "知识库分析" })).toBeVisible();
+  await expect(page.getByText("知识查询", { exact: true })).toBeVisible();
+  await expect(page.getByText("桌面云产品知识库", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("部分可回答", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("spec-clarify-requirement", { exact: true })).toBeVisible();
+
   // 用户管理：管理员创建独立的只读账号，Token 只显示一次。
   await page.getByRole("menuitem", { name: "用户管理" }).click();
   await expect(page.getByRole("heading", { name: "用户管理" })).toBeVisible();

@@ -232,6 +232,33 @@ export class DurableChunkRepository
       .map((row) => JSON.parse(String(row.payload_json)) as RunEvent);
   }
 
+  getKnowledgeSummary(filters: { from?: string; to?: string } = {}): Record<string, unknown> {
+    const events = this.database.prepare(
+      "SELECT payload_json FROM run_events WHERE event_type='knowledge_query_finished' ORDER BY occurred_at,event_id",
+    ).all().map((row) => JSON.parse(String(row.payload_json)) as RunEvent)
+      .filter((event) => (!filters.from || Date.parse(event.occurred_at) >= Date.parse(filters.from)) &&
+        (!filters.to || Date.parse(event.occurred_at) <= Date.parse(filters.to)));
+    const countBy = (field: keyof RunEvent) => Object.fromEntries([...events.reduce((map, event) => {
+      const key = String(event[field] ?? "unknown"); map.set(key, (map.get(key) ?? 0) + 1); return map;
+    }, new Map<string, number>())].sort(([left], [right]) => left.localeCompare(right)));
+    return {
+      total: events.length,
+      runs: new Set(events.map((event) => event.cospec_run_id)).size,
+      hits: events.reduce((sum, event) => sum + Number(event.hit_count ?? 0), 0),
+      citations: events.reduce((sum, event) => sum + Number(event.citation_count ?? 0), 0),
+      warnings: events.reduce((sum, event) => sum + Number(event.warning_count ?? 0), 0),
+      by_answerability: countBy("answerability"), by_kb: countBy("kb_name"),
+      by_status: countBy("query_status"),
+      by_version: countBy("kb_version"), by_revision: countBy("kb_revision"),
+      by_source: countBy("query_source"), by_consumer_skill: countBy("consumer_skill"),
+      items: events.map((event) => ({ query_id: event.query_id, cospec_run_id: event.cospec_run_id,
+        occurred_at: event.occurred_at, kb_name: event.kb_name, kb_version: event.kb_version ?? null, query_status: event.query_status,
+        kb_revision: event.kb_revision, query_source: event.query_source, consumer_skill: event.consumer_skill ?? null,
+        answerability: event.answerability ?? null, hit_count: event.hit_count, citation_count: event.citation_count,
+        warning_count: event.warning_count })),
+    };
+  }
+
   async acceptArtifact(
     metadata: ArtifactMetadata,
     bytes: Buffer,

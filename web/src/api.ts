@@ -54,6 +54,7 @@ export const telemetryQueries = {
   updateDashboardUser: (userId: string, changes: { role?: "viewer" | "admin"; status?: "active" | "disabled" }) => send<{ user: JsonObject }>(`/api/v1/admin/users/${encodeURIComponent(userId)}`, "PATCH", changes),
   getRunUsage: (filters: Record<string, string>) => get<JsonObject>(`/api/v1/summaries/run-usage?${new URLSearchParams(filters)}`),
   getWorkflowSummary: (filters: Record<string, string> = {}) => get<JsonObject>(`/api/v1/summaries/workflows?${new URLSearchParams(filters)}`),
+  getKnowledgeSummary: (filters: Record<string, string> = {}) => get<JsonObject>(`/api/v1/summaries/knowledge?${new URLSearchParams(filters)}`),
   getRunEvents: (runId: string) => get<{ items: JsonObject[] }>(`/api/v1/runs/${encodeURIComponent(runId)}/events`),
   listRuns: (limit: number, offset: number, filters: Record<string,string> = {}) => get<Page<RunItem>>(`/api/v1/runs?${new URLSearchParams({ limit:String(limit), offset:String(offset), ...filters })}`),
   getRun: (runId: string) => get<RunDetail>(`/api/v1/runs/${encodeURIComponent(runId)}`),
