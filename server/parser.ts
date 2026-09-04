@@ -1,4 +1,4 @@
-export const PARSER_VERSION = "0.5.1";
+export const PARSER_VERSION = "0.6.0";
 
 const CODEX_KNOWN_TYPES = new Set(["session_meta", "event_msg", "response_item", "turn_context", "compacted"]);
 const CLAUDE_CODE_KNOWN_TYPES = new Set(["queue-operation", "user", "assistant", "attachment", "last-prompt", "mode", "system"]);
@@ -27,7 +27,7 @@ export interface SkillMarkerFact {
 }
 export interface TurnEventFact {
   recordIndex: number; itemIndex: number; timestamp: string | null;
-  kind: "agent_message" | "user_prompt";
+  kind: "agent_message" | "user_prompt" | "user_continue" | "agent_turn_complete" | "agent_turn_complete_awaiting_user";
 }
 export interface ParseResult {
   parserVersion: string;
@@ -118,8 +118,16 @@ function extractCodexFacts(value: Record<string, unknown>, recordIndex: number, 
   if (contextWindowTokens !== null) contextWindows.push({ recordIndex, timestamp, contextWindowTokens });
   if (value.type === "response_item" && payload.type === "message" && typeof payload.role === "string") {
     messages.push({ recordIndex, timestamp, role: payload.role, model: null });
-    if (payload.role === "user") turnEvents.push({ recordIndex, itemIndex: 0, timestamp, kind: "user_prompt" });
+    if (payload.role === "user") {
+      turnEvents.push({ recordIndex, itemIndex: 0, timestamp, kind: "user_prompt" });
+      if (isContinuePrompt(payload.content)) turnEvents.push({ recordIndex, itemIndex: 0, timestamp, kind: "user_continue" });
+    }
     else if (payload.role === "assistant" && hasVisibleText(payload.content)) turnEvents.push({ recordIndex, itemIndex: 0, timestamp, kind: "agent_message" });
+  }
+  if (value.type === "event_msg" && payload.type === "task_complete") {
+    const lastMessage = typeof payload.last_agent_message === "string" ? payload.last_agent_message : "";
+    turnEvents.push({ recordIndex, itemIndex: 0, timestamp,
+      kind: looksLikeUserQuestion(lastMessage) ? "agent_turn_complete_awaiting_user" : "agent_turn_complete" });
   }
   if (value.type === "event_msg" && payload.type === "token_count") {
     const usage = object(object(payload.info)?.last_token_usage);
@@ -153,6 +161,7 @@ function extractClaudeCodeFacts(value: Record<string, unknown>, recordIndex: num
   if ((value.type === "user" || value.type === "assistant") && role) messages.push({ recordIndex, timestamp, role, model });
   if (value.type === "user" && value.isCompactSummary !== true && value.isMeta !== true && isHumanPrompt(message.content)) {
     turnEvents.push({ recordIndex, itemIndex: 0, timestamp, kind: "user_prompt" });
+    if (isContinuePrompt(message.content)) turnEvents.push({ recordIndex, itemIndex: 0, timestamp, kind: "user_continue" });
   } else if (value.type === "assistant" && hasVisibleText(message.content)) {
     turnEvents.push({ recordIndex, itemIndex: 0, timestamp, kind: "agent_message" });
   }
@@ -220,6 +229,26 @@ function hasVisibleText(content: unknown): boolean {
     return (block?.type === "text" || block?.type === "output_text")
       && typeof block.text === "string" && block.text.trim().length > 0;
   });
+}
+
+function visibleText(content: unknown): string {
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+  return content.map((item) => {
+    const block = object(item);
+    return (block?.type === "text" || block?.type === "input_text" || block?.type === "output_text") && typeof block.text === "string"
+      ? block.text.trim() : "";
+  }).filter(Boolean).join("\n").trim();
+}
+
+function isContinuePrompt(content: unknown): boolean {
+  return /^继续[。.!！]?$/.test(visibleText(content));
+}
+
+function looksLikeUserQuestion(text: string): boolean {
+  const normalized = text.trim();
+  if (!normalized) return false;
+  return /[?？]/.test(normalized) || /(?:^|\n)\s*(?:请选择|请确认|请提供|请回答|是否需要|需要您|需要你)/m.test(normalized);
 }
 
 function tokenFact(recordIndex: number, timestamp: string | null, model: string | null, usage: Record<string, unknown>, source: "codex" | "claude_code"): TokenUsageFact {

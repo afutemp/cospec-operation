@@ -62,9 +62,13 @@ test("workflow lifecycle events are accepted idempotently and queryable", async 
         headers: { "content-type": "application/json" }, body: JSON.stringify(skill) });
       assert.equal(accepted.status, 200);
     }
+    const skipped = { ...skill, event_id: `${runId}:skill:end:1234abcd`, event_type: "skill_finished", status: "skipped" };
+    const skippedResponse = await fetch(`${address}/api/v1/run-events`, { method: "POST",
+      headers: { "content-type": "application/json" }, body: JSON.stringify(skipped) });
+    assert.equal(skippedResponse.status, 200);
     const response = await fetch(`${address}/api/v1/runs/${runId}/events`, { headers: { authorization: `Bearer ${TOKEN}` } });
     assert.equal(response.status, 200);
-    assert.deepEqual((await response.json() as { items: unknown[] }).items.length, 2);
+    assert.deepEqual((await response.json() as { items: unknown[] }).items.length, 3);
     assert.deepEqual(repository.getRunEvents(runId)[0]?.actor, { employee_id: "63027", display_name: "测试规划员", proposer_dept: "研发体系/工程技术部" });
   } finally { await app.close(); }
 });

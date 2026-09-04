@@ -350,7 +350,7 @@ function validRunEvent(value: unknown): value is RunEvent {
   if (event.event_type.startsWith("skill_")) return !!event.skill && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(event.skill) &&
     !!event.execution_id && /^[A-Za-z0-9]{8}$/.test(event.execution_id) &&
     (event.event_type === "skill_started" ? event.status === undefined
-      : !!event.status && ["completed", "failed", "interrupted", "orphan"].includes(event.status));
+      : !!event.status && ["completed", "failed", "interrupted", "skipped", "orphan"].includes(event.status));
   if (event.event_type === "knowledge_query_finished") return !!event.query_id && event.query_id.length <= 128 &&
     !!event.kb_name && event.kb_name.length <= 128 && !!event.kb_revision && event.kb_revision.length <= 128 &&
     !!event.query_status && ["completed", "degraded", "failed", "incomplete"].includes(event.query_status) &&

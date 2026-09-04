@@ -87,6 +87,23 @@ test("Codex parser recognizes output_text as an Agent message boundary", () => {
   ]);
 });
 
+test("Codex parser marks an unprompted turn completion followed by an exact continue reply", () => {
+  const result = parseCodexJsonl(Buffer.from([
+    JSON.stringify({ type: "event_msg", timestamp: "2026-09-01T01:00:00Z", payload: {
+      type: "task_complete", last_agent_message: "现在撰写交付物并落盘。" } }),
+    JSON.stringify({ type: "response_item", timestamp: "2026-09-01T01:00:05Z", payload: { type: "message", role: "user",
+      content: [{ type: "input_text", text: "继续" }] } }),
+    JSON.stringify({ type: "event_msg", timestamp: "2026-09-01T01:01:00Z", payload: {
+      type: "task_complete", last_agent_message: "当前结果是否确认无误？" } }),
+    JSON.stringify({ type: "response_item", timestamp: "2026-09-01T01:01:05Z", payload: { type: "message", role: "user",
+      content: [{ type: "input_text", text: "继续" }] } }),
+  ].join("\n") + "\n"));
+  assert.deepEqual(result.turnEventFacts.map((item) => item.kind), [
+    "agent_turn_complete", "user_prompt", "user_continue",
+    "agent_turn_complete_awaiting_user", "user_prompt", "user_continue",
+  ]);
+});
+
 test("parsers extract only exact Skill markers from tool results", () => {
   const claude = parseClaudeCodeJsonl(Buffer.from([
     JSON.stringify({ type: "user", timestamp: "2026-09-01T01:00:00Z", message: { role: "user", content: [
@@ -359,6 +376,50 @@ test("structured Skill events provide intervals while JSONL provides waits and r
   assert.deepEqual({ durationMs: facts.skills.items[0].durationMs, elapsedMs: facts.skills.items[0].elapsedMs,
     waitingForUserMs: facts.skills.items[0].waitingForUserMs, inputTokens: facts.skills.items[0].resources.self.tokens.input_tokens },
     { durationMs: 20000, elapsedMs: 80000, waitingForUserMs: 60000, inputTokens: 15 });
+  repository.close();
+});
+
+test("a user-skipped Skill remains auditable but is excluded from execution metrics", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cospec-skipped-skill-events-"));
+  const runId = randomUUID();
+  const repository = await DurableChunkRepository.open(root);
+  const bytes = Buffer.from(`${JSON.stringify({ type: "assistant", timestamp: "2026-09-01T00:59:59.000Z", message: { role: "assistant", content: [] } })}\n`);
+  await repository.accept(metadata(bytes, runId), bytes);
+  await new ParserWorker(repository).runPending();
+  repository.acceptRunEvent({ schema_version: "0.1.0", event_id: `${runId}:skill:start:1234abcd`, cospec_run_id: runId,
+    event_type: "skill_started", occurred_at: "2026-09-01T01:00:00.000Z", skill: "spec-journey-user", execution_id: "1234abcd" });
+  repository.acceptRunEvent({ schema_version: "0.1.0", event_id: `${runId}:skill:end:1234abcd`, cospec_run_id: runId,
+    event_type: "skill_finished", occurred_at: "2026-09-01T01:00:01.000Z", skill: "spec-journey-user", execution_id: "1234abcd", status: "skipped" });
+  const skills = (repository.getRunFacts(runId) as { skills: Record<string, any> }).skills;
+  assert.equal(skills.executions, 0);
+  assert.deepEqual(skills.items, []);
+  repository.close();
+});
+
+test("an unprompted Codex turn completion resumed by exact continue is diagnosed during an active Skill", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cospec-agent-turn-ended-early-"));
+  const runId = randomUUID();
+  const bytes = Buffer.from([
+    JSON.stringify({ type: "event_msg", timestamp: "2026-09-01T01:00:10.000Z", payload: {
+      type: "task_complete", last_agent_message: "现在撰写交付物并落盘。" } }),
+    JSON.stringify({ type: "response_item", timestamp: "2026-09-01T01:00:20.000Z", payload: { type: "message", role: "user",
+      content: [{ type: "input_text", text: "继续" }] } }),
+    JSON.stringify({ type: "event_msg", timestamp: "2026-09-01T01:01:10.000Z", payload: {
+      type: "task_complete", last_agent_message: "当前阶段结果是否确认无误？" } }),
+    JSON.stringify({ type: "response_item", timestamp: "2026-09-01T01:01:20.000Z", payload: { type: "message", role: "user",
+      content: [{ type: "input_text", text: "继续" }] } }),
+  ].join("\n") + "\n");
+  const repository = await DurableChunkRepository.open(root);
+  await repository.accept(metadata(bytes, runId), bytes); await new ParserWorker(repository).runPending();
+  repository.acceptRunEvent({ schema_version: "0.1.0", event_id: `${runId}:skill:start:1234abcd`, cospec_run_id: runId,
+    event_type: "skill_started", occurred_at: "2026-09-01T01:00:00.000Z", skill: "spec-clarify-requirement", execution_id: "1234abcd" });
+  repository.acceptRunEvent({ schema_version: "0.1.0", event_id: `${runId}:skill:end:1234abcd`, cospec_run_id: runId,
+    event_type: "skill_finished", occurred_at: "2026-09-01T01:02:00.000Z", skill: "spec-clarify-requirement", execution_id: "1234abcd", status: "completed" });
+  const diagnostic = (repository.getRunFacts(runId) as { diagnostics: Record<string, any> }).diagnostics.agent_turn_ended_early;
+  assert.equal(diagnostic.count, 1);
+  assert.equal(diagnostic.coverage, "codex_only");
+  assert.deepEqual(diagnostic.items[0], { at: "2026-09-01T01:00:10.000Z", resumedAt: "2026-09-01T01:00:20.000Z",
+    skill: "spec-clarify-requirement", executionId: "1234abcd" });
   repository.close();
 });
 

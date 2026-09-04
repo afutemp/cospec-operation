@@ -46,5 +46,6 @@
 | POC-41 | [建设推广使用页面](POC-41-adoption-analysis.md) | 当前 Linux 环境通过（Windows 待验证） |
 | POC-42 | [临时本地用户管理](POC-42-local-user-management.md) | 当前 Linux 环境通过（Windows 待验证） |
 | POC-43 | [上报接口取消 Token](POC-43-tokenless-ingest.md) | 当前 Linux 环境通过（Windows 待验证） |
+| POC-44 | [统一 Cospec 工作流编排与运营边界](POC-44-unified-workflow-engine.md) | 当前 Linux 环境通过（真实客户端待验收） |
 
 `POC-01/01A` 已冻结，`POC-02/03/04/05/06/07/09/10/11/13/14/15/16/17/18/19/20/22/23/26/27` 已完成；`POC-08/12/21/24/25/28/29/30/31` 当前 Linux 环境验收通过，Windows 实机项保持待验证。协议见 [upload-protocol-v0.1.md](../docs/upload-protocol-v0.1.md)、[artifact-upload-v0.1.md](../docs/artifact-upload-v0.1.md)、[collector-lifecycle-v0.1.md](../docs/collector-lifecycle-v0.1.md) 和 [Collector 调用契约 0.1](../docs/collector-integration-contract-v0.1.md)。JSON Schema 位于 `contracts/`。

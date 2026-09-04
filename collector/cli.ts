@@ -156,8 +156,8 @@ function stageStatus(value: string): "completed" | "failed" | "interrupted" | "s
   return finishStatus(value);
 }
 
-function skillStatus(value: string): "completed" | "failed" | "interrupted" | "orphan" {
-  if (value === "orphan") return value;
+function skillStatus(value: string): "completed" | "failed" | "interrupted" | "skipped" | "orphan" {
+  if (value === "orphan" || value === "skipped") return value;
   return finishStatus(value);
 }
 

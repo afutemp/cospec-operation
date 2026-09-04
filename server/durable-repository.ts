@@ -1411,7 +1411,7 @@ export class DurableChunkRepository
     const effectiveSkillRows = preferStructuredSkillRows(skillMarkerRows, structuredSkillRows);
     const turnEventRows = this.database
       .prepare(
-        `SELECT f.kind,f.timestamp FROM turn_event_facts f JOIN chunks c ON c.upload_id=f.upload_id
+        `SELECT f.kind,f.timestamp,f.record_index,f.item_index FROM turn_event_facts f JOIN chunks c ON c.upload_id=f.upload_id
       WHERE c.cospec_run_id=? AND f.parser_version=? ORDER BY c.start_offset,f.record_index,f.item_index`,
       )
       .all(runId, version) as Array<Record<string, unknown>>;
@@ -1464,6 +1464,7 @@ export class DurableChunkRepository
         lastEventAt: time.last_event_at ?? null,
         semantics: "host_record_span",
       },
+      diagnostics: summarizeRunDiagnostics(effectiveSkillRows, turnEventRows),
       skills,
       attribution: {
         run: "explicit_jsonl_offset_interval",
@@ -2183,6 +2184,46 @@ export class DurableChunkRepository
   }
 }
 
+function summarizeRunDiagnostics(
+  skillRows: Array<Record<string, unknown>>,
+  turnRows: Array<Record<string, unknown>>,
+): Record<string, unknown> {
+  const completions = turnRows.filter((row) => String(row.kind).startsWith("agent_turn_complete"));
+  const continues = turnRows.filter((row) => row.kind === "user_continue");
+  const starts = new Map<string, Record<string, unknown>>();
+  const intervals: Array<{ skill: string; executionId: string; startMs: number; endMs: number | null }> = [];
+  for (const row of skillRows) {
+    const key = `${String(row.skill)}\0${String(row.execution_id)}`;
+    if (row.phase === "start") { if (!starts.has(key)) starts.set(key, row); continue; }
+    const start = starts.get(key); if (!start) continue; starts.delete(key);
+    const startMs = timestampMs(start.timestamp); const endMs = timestampMs(row.timestamp);
+    if (startMs !== null) intervals.push({ skill: String(row.skill), executionId: String(row.execution_id), startMs, endMs });
+  }
+  for (const start of starts.values()) {
+    const startMs = timestampMs(start.timestamp);
+    if (startMs !== null) intervals.push({ skill: String(start.skill), executionId: String(start.execution_id), startMs, endMs: null });
+  }
+  const items = continues.flatMap((continued) => {
+    const continuedMs = timestampMs(continued.timestamp); if (continuedMs === null) return [];
+    const completion = completions.filter((row) => {
+      const value = timestampMs(row.timestamp); return value !== null && value <= continuedMs;
+    }).at(-1);
+    if (!completion || completion.kind !== "agent_turn_complete") return [];
+    const completionMs = timestampMs(completion.timestamp)!;
+    const active = intervals.filter((item) => item.startMs <= completionMs && (item.endMs === null || completionMs < item.endMs)).at(-1);
+    if (!active) return [];
+    return [{ at: completion.timestamp, resumedAt: continued.timestamp, skill: active.skill, executionId: active.executionId }];
+  });
+  return {
+    agent_turn_ended_early: {
+      count: items.length,
+      coverage: "codex_only",
+      semantics: "unprompted_task_complete_followed_by_exact_continue_during_active_skill",
+      items,
+    },
+  };
+}
+
 async function writeImmutable(
   path: string,
   bytes: Buffer,
@@ -2417,7 +2458,7 @@ interface SkillExecution {
   runId: string;
   skill: string;
   executionId: string;
-  status: "ok" | "failed" | "interrupted" | "open" | "orphan" | "invalid";
+  status: "ok" | "failed" | "interrupted" | "skipped" | "open" | "orphan" | "invalid";
   startedAt: string | null;
   endedAt: string | null;
   durationMs: number | null;
@@ -2428,9 +2469,9 @@ interface SkillExecution {
   resources?: { inclusive: SkillResourceSummary; self: SkillResourceSummary };
 }
 
-function structuredSkillStatus(status: RunEvent["status"]): "ok" | "failed" | "interrupted" | "orphan" {
+function structuredSkillStatus(status: RunEvent["status"]): "ok" | "failed" | "interrupted" | "skipped" | "orphan" {
   if (status === "completed") return "ok";
-  if (status === "failed" || status === "interrupted" || status === "orphan") return status;
+  if (status === "failed" || status === "interrupted" || status === "skipped" || status === "orphan") return status;
   return "interrupted";
 }
 
@@ -2552,8 +2593,9 @@ function summarizeSkillExecutions(
       (Date.parse(left.startedAt ?? left.endedAt ?? "") || 0) -
       (Date.parse(right.startedAt ?? right.endedAt ?? "") || 0),
   );
+  const countedExecutions = executions.filter((item) => item.status !== "skipped");
   const resourceCoverage = resourceFacts
-    ? attributeSkillResources(executions, resourceFacts)
+    ? attributeSkillResources(countedExecutions, resourceFacts)
     : null;
   const summarize = (items: SkillExecution[]) => {
     const durations = items
@@ -2616,13 +2658,13 @@ function summarizeSkillExecutions(
     return result;
   };
   const grouped = new Map<string, SkillExecution[]>();
-  for (const execution of executions) {
+  for (const execution of countedExecutions) {
     const values = grouped.get(execution.skill) ?? [];
     values.push(execution);
     grouped.set(execution.skill, values);
   }
   return {
-    ...summarize(executions),
+    ...summarize(countedExecutions),
     semantics: "skill_event_interval_excluding_user_wait",
     resourceAttribution: resourceCoverage,
     bySkill: Object.fromEntries(
@@ -2630,7 +2672,7 @@ function summarizeSkillExecutions(
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([skill, items]) => [skill, summarize(items)]),
     ),
-    items: executions.map(
+    items: countedExecutions.map(
       ({ runId: _runId, waitingIntervalsMs: _waitingIntervalsMs, ...item }) =>
         item,
     ),

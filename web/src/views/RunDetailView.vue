@@ -134,6 +134,9 @@ const artifactTree = computed<ArtifactTreeNode[]>(() => {
 const skillRows = computed(() =>
   Array.isArray(facts.value.skills?.items) ? facts.value.skills.items : [],
 );
+const earlyTurnDiagnostic = computed(() =>
+  facts.value.diagnostics?.agent_turn_ended_early ?? { count: 0, items: [] },
+);
 const loading = computed(() => queries.value.some((query) => query.isLoading));
 const failed = computed(() => queries.value[0]?.isError);
 async function copy() {
@@ -717,7 +720,22 @@ const answerabilityLabel: Record<string, string> = { answerable: "可回答", pa
               label="工具调用" /></el-table
         ></el-tab-pane>
         <el-tab-pane label="数据诊断" name="collection"
-          ><h3>原始 JSONL</h3>
+          ><h3>执行异常</h3>
+          <el-alert
+            v-if="earlyTurnDiagnostic.count"
+            :title="`检测到 ${earlyTurnDiagnostic.count} 次 Agent 提前结束`"
+            description="Agent 没有提出问题就结束了当前回合，随后用户只能回复“继续”恢复执行。该判断目前仅覆盖 Codex。"
+            type="warning"
+            :closable="false"
+            show-icon
+          />
+          <div v-else class="empty compact">未检测到 Agent 提前结束</div>
+          <el-table v-if="earlyTurnDiagnostic.items?.length" :data="earlyTurnDiagnostic.items" size="small">
+            <el-table-column label="发生时间" min-width="170"><template #default="{ row }">{{ datetime(row.at) }}</template></el-table-column>
+            <el-table-column prop="skill" label="所在 SKILL" min-width="210" />
+            <el-table-column label="用户恢复时间" min-width="170"><template #default="{ row }">{{ datetime(row.resumedAt) }}</template></el-table-column>
+          </el-table>
+          <h3>原始 JSONL</h3>
           <el-table :data="rawSources" size="small"
             ><el-table-column label="来源" min-width="140"
               ><template #default="{ row }">{{
