@@ -170,6 +170,11 @@ const statusLabel: Record<string, string> = {
   failed: "失败",
   interrupted: "中断",
 };
+const osLabel: Record<string, string> = {
+  linux: "Linux",
+  win32: "Windows",
+  darwin: "macOS",
+};
 </script>
 <template>
   <div>
@@ -338,6 +343,10 @@ const statusLabel: Record<string, string> = {
         ><el-table-column label="Agent" width="120"
           ><template #default="{ row }">{{
             row.agentType === "claude_code" ? "Claude Code" : "Codex"
+          }}</template></el-table-column
+        ><el-table-column label="操作系统" width="115"
+          ><template #default="{ row }">{{
+            row.osPlatform ? (osLabel[row.osPlatform] ?? row.osPlatform) : "未上报"
           }}</template></el-table-column
         ><el-table-column label="SKILL" min-width="220"
           ><template #default="{ row }"

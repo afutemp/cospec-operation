@@ -1577,6 +1577,10 @@ export class DurableChunkRepository
       COALESCE(MIN(CASE WHEN json_extract(c.metadata_json,'$.session.role')='main' OR json_extract(c.metadata_json,'$.session.role') IS NULL
         THEN json_extract(c.metadata_json,'$.environment.agent_version') END),MIN(json_extract(c.metadata_json,'$.environment.agent_version'))) AS agent_version,
       COALESCE(MIN(CASE WHEN json_extract(c.metadata_json,'$.session.role')='main' OR json_extract(c.metadata_json,'$.session.role') IS NULL
+        THEN json_extract(c.metadata_json,'$.environment.os_platform') END),MIN(json_extract(c.metadata_json,'$.environment.os_platform'))) AS os_platform,
+      COALESCE(MIN(CASE WHEN json_extract(c.metadata_json,'$.session.role')='main' OR json_extract(c.metadata_json,'$.session.role') IS NULL
+        THEN json_extract(c.metadata_json,'$.environment.os_arch') END),MIN(json_extract(c.metadata_json,'$.environment.os_arch'))) AS os_arch,
+      COALESCE(MIN(CASE WHEN json_extract(c.metadata_json,'$.session.role')='main' OR json_extract(c.metadata_json,'$.session.role') IS NULL
         THEN json_extract(c.metadata_json,'$.environment.anonymous_terminal_id') END),MIN(json_extract(c.metadata_json,'$.environment.anonymous_terminal_id'))) AS anonymous_terminal_id,
       COALESCE(MIN(CASE WHEN json_extract(c.metadata_json,'$.session.role')='main' OR json_extract(c.metadata_json,'$.session.role') IS NULL
         THEN json_extract(c.metadata_json,'$.environment.cospec_plugin_version') END),MIN(json_extract(c.metadata_json,'$.environment.cospec_plugin_version'))) AS cospec_plugin_version,
@@ -1823,6 +1827,7 @@ export class DurableChunkRepository
 
     const byAgent: Record<string, number> = {};
     const byAgentVersion: Record<string, number> = {};
+    const byOperatingSystem: Record<string, number> = {};
     const byDay: Record<string, number> = {};
     const byCospecPluginVersion: Record<string, number> = {};
     const pluginTerminals = new Map<string, Set<string>>();
@@ -1836,6 +1841,7 @@ export class DurableChunkRepository
         byAgentVersion,
         `${String(row.agent_type)}@${String(row.agent_version)}`,
       );
+      increment(byOperatingSystem, nullableString(row.os_platform) ?? "<missing>");
       increment(
         byDay,
         new Date(
@@ -1993,6 +1999,7 @@ export class DurableChunkRepository
         without_parser_facts: selected.length - runsWithParser,
         byAgent,
         byAgentVersion,
+        byOperatingSystem,
         byCospecPluginVersion,
         byDay,
       },
@@ -2299,6 +2306,8 @@ function runSummarySql(): string {
     COALESCE(MIN(CASE WHEN json_extract(c.metadata_json,'$.session.role')='main' OR json_extract(c.metadata_json,'$.session.role') IS NULL
       THEN json_extract(c.metadata_json,'$.environment.agent_type') END),MIN(json_extract(c.metadata_json,'$.environment.agent_type'))) AS agent_type,
     COALESCE(MIN(CASE WHEN json_extract(c.metadata_json,'$.session.role')='main' OR json_extract(c.metadata_json,'$.session.role') IS NULL THEN json_extract(c.metadata_json,'$.environment.agent_version') END),MIN(json_extract(c.metadata_json,'$.environment.agent_version'))) AS agent_version,
+    COALESCE(MIN(CASE WHEN json_extract(c.metadata_json,'$.session.role')='main' OR json_extract(c.metadata_json,'$.session.role') IS NULL THEN json_extract(c.metadata_json,'$.environment.os_platform') END),MIN(json_extract(c.metadata_json,'$.environment.os_platform'))) AS os_platform,
+    COALESCE(MIN(CASE WHEN json_extract(c.metadata_json,'$.session.role')='main' OR json_extract(c.metadata_json,'$.session.role') IS NULL THEN json_extract(c.metadata_json,'$.environment.os_arch') END),MIN(json_extract(c.metadata_json,'$.environment.os_arch'))) AS os_arch,
     COALESCE(MIN(CASE WHEN json_extract(c.metadata_json,'$.session.role')='main' OR json_extract(c.metadata_json,'$.session.role') IS NULL THEN json_extract(c.metadata_json,'$.environment.cospec_plugin_version') END),MIN(json_extract(c.metadata_json,'$.environment.cospec_plugin_version'))) AS cospec_plugin_version,
     COALESCE(MIN(CASE WHEN json_extract(c.metadata_json,'$.session.role')='main' OR json_extract(c.metadata_json,'$.session.role') IS NULL THEN json_extract(c.metadata_json,'$.environment.anonymous_terminal_id') END),MIN(json_extract(c.metadata_json,'$.environment.anonymous_terminal_id'))) AS anonymous_terminal_id,
     COUNT(*) AS chunk_count,SUM(c.end_offset-c.start_offset) AS byte_count,
@@ -2318,6 +2327,8 @@ function toRunListItem(row: Record<string, unknown>): RunListItem {
     agentType: String(row.agent_type),
     agentVersion: String(row.agent_version),
     cospecPluginVersion: String(row.cospec_plugin_version),
+    osPlatform: nullableString(row.os_platform),
+    osArch: nullableString(row.os_arch),
     chunkCount: Number(row.chunk_count),
     byteCount: Number(row.byte_count),
     startOffset: Number(row.start_offset),

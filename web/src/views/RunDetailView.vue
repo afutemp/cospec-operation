@@ -182,6 +182,11 @@ const workflowKindLabel: Record<string, string> = {
   small: "小需求",
   custom: "自定义",
 };
+const osLabel: Record<string, string> = {
+  linux: "Linux",
+  win32: "Windows",
+  darwin: "macOS",
+};
 const workflowStatusLabel: Record<string, string> = {
   running: "进行中",
   completed: "完成",
@@ -263,7 +268,11 @@ const answerabilityLabel: Record<string, string> = { answerable: "可回答", pa
             >{{
               detail.agentType === "claude_code" ? "Claude Code" : "Codex"
             }}
-            · {{ detail.sourceVersion }}</strong
+            · {{ detail.sourceVersion }}<br />{{
+              detail.osPlatform
+                ? (osLabel[detail.osPlatform] ?? detail.osPlatform)
+                : "操作系统未上报"
+            }}{{ detail.osArch ? ` · ${detail.osArch}` : "" }}</strong
           >
         </div>
         <div>

@@ -62,6 +62,10 @@ const agentVersionRows = computed(() => Object.entries(usage.value.runs?.byAgent
 const cospecVersionRows = computed(() => Object.entries(usage.value.runs?.byCospecPluginVersion ?? {}).map(([version, runs]) => ({
   version: version === "<missing>" ? "未上报版本" : version, runs: Number(runs),
 })).sort((a, b) => b.runs - a.runs));
+const osName: Record<string, string> = { linux: "Linux", win32: "Windows", darwin: "macOS", "<missing>": "未上报" };
+const operatingSystemRows = computed(() => Object.entries(usage.value.runs?.byOperatingSystem ?? {}).map(([platform, runs]) => ({
+  platform: osName[platform] ?? platform, runs: Number(runs),
+})).sort((a, b) => b.runs - a.runs));
 
 function syncRoute() {
   void router.replace({ query: {
@@ -135,6 +139,14 @@ watch(() => filters.proposerDept, syncRoute);
           <el-table-column prop="runs" label="工作流" width="90" />
         </el-table>
         <div v-if="!usageQuery.isLoading.value && !agentVersionRows.length" class="empty compact">当前范围暂无 Agent 数据</div>
+      </div>
+      <div class="panel">
+        <div class="section-head"><div><h2>操作系统分布</h2><p>工作流实际运行所在的操作系统</p></div></div>
+        <el-table :data="operatingSystemRows" v-loading="usageQuery.isLoading.value">
+          <el-table-column prop="platform" label="操作系统" min-width="130" />
+          <el-table-column prop="runs" label="工作流" width="90" />
+        </el-table>
+        <div v-if="!usageQuery.isLoading.value && !operatingSystemRows.length" class="empty compact">当前范围暂无操作系统数据</div>
       </div>
       <div class="panel">
         <div class="section-head"><div><h2>Cospec 版本使用情况</h2><p>实际运行工作流的 Cospec 版本</p></div></div>

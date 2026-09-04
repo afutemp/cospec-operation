@@ -133,6 +133,8 @@ test("read-only query API returns active-version summaries without content or pa
     assert.equal(list.json().items[0].workflowKind, "large");
     assert.equal(list.json().items[0].displayName, "测试规划员");
     assert.equal(list.json().items[0].workflowStatus, "interrupted");
+    assert.equal(list.json().items[0].osPlatform, "linux");
+    assert.equal(list.json().items[0].osArch, "x64");
     assert.equal(
       (
         await app.inject({
@@ -430,6 +432,7 @@ test("run usage summary reports coverage and supports agent, version, model and 
     const summary = response.json();
     assert.equal(summary.runs.total, 3);
     assert.deepEqual(summary.runs.byAgent, { claude_code: 1, codex: 2 });
+    assert.deepEqual(summary.runs.byOperatingSystem, { linux: 3 });
     assert.deepEqual(summary.terminals, {
       active_anonymous_terminals: 1,
       runs_with_terminal_id: 2,

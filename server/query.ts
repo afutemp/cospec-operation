@@ -1,5 +1,6 @@
 export interface RunListItem {
   runId: string; agentSessionId: string; sourceType: string; sourceVersion: string; agentType: string; agentVersion: string; cospecPluginVersion: string;
+  osPlatform: string | null; osArch: string | null;
   chunkCount: number; byteCount: number; startOffset: number; endOffset: number;
   activeParserVersion: string | null; firstReceivedAt: string; lastReceivedAt: string;
   workflowKind: string | null; workflowName: string | null; workflowStatus: string;
