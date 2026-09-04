@@ -255,7 +255,7 @@ export class DurableChunkRepository
         occurred_at: event.occurred_at, kb_name: event.kb_name, kb_version: event.kb_version ?? null, query_status: event.query_status,
         kb_revision: event.kb_revision, query_source: event.query_source, consumer_skill: event.consumer_skill ?? null,
         answerability: event.answerability ?? null, hit_count: event.hit_count, citation_count: event.citation_count,
-        warning_count: event.warning_count })),
+        warning_count: event.warning_count, detail: event.query_detail ?? null })),
     };
   }
 

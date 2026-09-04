@@ -136,6 +136,31 @@ test("CLI, daemon and local mock receiver support complete-line incremental resu
   }
 });
 
+test("knowledge query detail travels through CLI, daemon and HTTP storage", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cospec-knowledge-e2e-"));
+  const sessionsRoot = join(root, "sessions"); const stateDirectory = join(root, "state");
+  const sessionId = randomUUID(); const runId = randomUUID(); await mkdir(sessionsRoot, { recursive: true });
+  await writeFile(join(sessionsRoot, `rollout-${sessionId}.jsonl`), `${JSON.stringify({ type: "session_meta", payload: { id: sessionId, cli_version: "0.150.1" } })}\n`);
+  const payloadPath = join(root, "query.json");
+  const detail = { question: "国产域控支持哪些能力？", answer: "支持批量加域。[KB-1]", hits: [{ path: "03/能力.md", excerpt: "支持批量加域" }], citations: [{ id: "KB-1", path: "03/能力.md" }] };
+  await writeFile(payloadPath, JSON.stringify(detail));
+  const repository = await DurableChunkRepository.open(join(root, "server"));
+  const app = await createIngestApp({ bearerToken: "unused", repository, queryRepository: repository });
+  const address = await app.listen({ host: "127.0.0.1", port: 0 });
+  const env = { ...process.env, CODEX_SESSIONS_ROOT: sessionsRoot, COSPEC_TELEMETRY_STATE_DIR: stateDirectory,
+    COSPEC_TELEMETRY_NAMESPACE: `knowledge-${process.pid}-${Date.now()}`, COSPEC_TELEMETRY_SERVER_URL: address };
+  try {
+    await cli(["ensure", "--agent", "codex", "--session-id", sessionId, "--run-id", runId], env);
+    await cli(["knowledge-query", "--run-id", runId, "--query-id", "q1", "--kb-name", "desktop-cloud", "--kb-revision", "sha256:abc",
+      "--query-status", "completed", "--query-source", "workflow", "--hit-count", "1", "--citation-count", "1", "--warning-count", "0", "--payload-file", payloadPath], env);
+    await waitFor(async () => repository.getRunEvents(runId).some((event) => event.event_type === "knowledge_query_finished"));
+    const event = repository.getRunEvents(runId).find((item) => item.event_type === "knowledge_query_finished");
+    assert.deepEqual(event?.query_detail, detail);
+  } finally {
+    await cli(["shutdown"], env).catch(() => undefined); await app.close(); repository.close(); await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("single-file Collector freezes, uploads, lists and downloads a manifest artifact through durable HTTP storage", async () => {
   const root = await mkdtemp(join(tmpdir(), "cospec-artifact-e2e-")); const sessionsRoot = join(root, "sessions"); const stateDirectory = join(root, "state");
   const sessionId = randomUUID(); const runId = randomUUID(); const token = "artifact-e2e-token"; await mkdir(sessionsRoot, { recursive: true });

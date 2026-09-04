@@ -357,6 +357,7 @@ function validRunEvent(value: unknown): value is RunEvent {
     (!event.kb_version || event.kb_version.length <= 128) && ["workflow", "user"].includes(event.query_source ?? "") &&
     (!event.consumer_skill || /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(event.consumer_skill)) &&
     (!event.answerability || ["answerable", "partially_answerable", "unanswerable", "conflicted"].includes(event.answerability)) &&
+    (!event.query_detail || (typeof event.query_detail === "object" && !Array.isArray(event.query_detail))) &&
     [event.hit_count, event.citation_count, event.warning_count].every((count) => Number.isInteger(count) && Number(count) >= 0);
   return !!event.status && ["completed", "failed", "interrupted"].includes(event.status);
 }

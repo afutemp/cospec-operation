@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { startDaemon } from "./daemon.js";
 import { request } from "./ipc.js";
@@ -103,6 +104,7 @@ async function main(): Promise<void> {
       return value;
     };
     const queryId = required("query-id");
+    const detail = option("payload-file") ? JSON.parse(readFileSync(option("payload-file")!, "utf8")) as Record<string, unknown> : undefined;
     const event = {
       schema_version: "0.1.0" as const,
       event_id: `${runId}:knowledge-query:${queryId}`,
@@ -118,6 +120,7 @@ async function main(): Promise<void> {
       ...(consumerSkill ? { consumer_skill: consumerSkill } : {}),
       ...(answerability ? { answerability: answerability as "answerable" | "partially_answerable" | "unanswerable" | "conflicted" } : {}),
       hit_count: count("hit-count"), citation_count: count("citation-count"), warning_count: count("warning-count"),
+      ...(detail ? { query_detail: detail } : {}),
     };
     await sendWithAutostart({ type: "event", event }); return;
   }

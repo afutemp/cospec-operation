@@ -68,18 +68,20 @@ test("durable artifact content and Run association survive a server restart", as
   await rm(root, { recursive: true, force: true });
 });
 
-test("knowledge query events are summarized without storing question or answer text", async () => {
+test("knowledge query events retain full query details for operational diagnosis", async () => {
   const root = await mkdtemp(join(tmpdir(), "cospec-knowledge-summary-"));
   const repository = await DurableChunkRepository.open(root); const runId = randomUUID();
   repository.acceptRunEvent({ schema_version: "0.1.0", event_id: `${runId}:knowledge-query:q1`, cospec_run_id: runId,
     event_type: "knowledge_query_finished", occurred_at: "2026-09-03T12:00:00.000Z", query_id: "q1", query_status: "degraded",
     kb_name: "desktop-cloud", kb_version: "2026.09", kb_revision: "sha256:abc", query_source: "workflow",
-    consumer_skill: "spec-clarify-requirement", answerability: "partially_answerable", hit_count: 4, citation_count: 2, warning_count: 1 });
+    consumer_skill: "spec-clarify-requirement", answerability: "partially_answerable", hit_count: 4, citation_count: 2, warning_count: 1,
+    query_detail: { question: "当前功能是什么？", answer: "支持功能 A。[KB-1]", hits: [{ path: "02/功能.md", excerpt: "功能 A" }], warnings: [{ code: "SOURCE_GAP", message: "缺少版本说明" }] } });
   const summary = repository.getKnowledgeSummary() as any;
   assert.equal(summary.total, 1); assert.equal(summary.runs, 1); assert.equal(summary.hits, 4);
   assert.deepEqual(summary.by_answerability, { partially_answerable: 1 });
   assert.deepEqual(summary.by_consumer_skill, { "spec-clarify-requirement": 1 });
-  assert.equal(JSON.stringify(summary).includes("question"), false); assert.equal(JSON.stringify(summary).includes("answer text"), false);
+  assert.equal(summary.items[0].detail.question, "当前功能是什么？");
+  assert.equal(summary.items[0].detail.hits[0].path, "02/功能.md");
   repository.close(); await rm(root, { recursive: true, force: true });
 });
 

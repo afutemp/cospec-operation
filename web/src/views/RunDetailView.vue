@@ -4,6 +4,7 @@ import { useQueries } from "@tanstack/vue-query";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { InfoFilled } from "@element-plus/icons-vue";
+import KnowledgeQueryDetail from "../components/KnowledgeQueryDetail.vue";
 import { telemetryQueries } from "../api";
 import {
   bytes,
@@ -70,6 +71,7 @@ const chunks = computed(() => queries.value[2]?.data?.items ?? []);
 const replays = computed(() => queries.value[3]?.data?.items ?? []);
 const events = computed(() => queries.value[4]?.data?.items ?? []);
 const knowledgeEvents = computed(() => events.value.filter((item:any) => item.event_type === "knowledge_query_finished"));
+const selectedKnowledge = ref<any>(null);
 const workflowEvents = computed(() => events.value.filter((item:any) => item.event_type !== "knowledge_query_finished"));
 const artifacts = computed(() => queries.value[5]?.data?.items ?? []);
 const isAdmin = computed(() => queries.value[6]?.data?.role === "admin");
@@ -354,9 +356,11 @@ const answerabilityLabel: Record<string, string> = { answerable: "可回答", pa
             <el-table-column prop="hit_count" label="命中" width="75" />
             <el-table-column prop="citation_count" label="引用" width="75" />
             <el-table-column prop="warning_count" label="告警" width="75" />
+            <el-table-column label="操作" width="100"><template #default="{ row }"><el-button link type="primary" :disabled="!row.query_detail" @click="selectedKnowledge = { ...row, detail: row.query_detail }">查看详情</el-button></template></el-table-column>
           </el-table>
           <div v-if="!knowledgeEvents.length" class="empty">当前 Run 没有知识库查询记录</div>
         </el-tab-pane>
+        <el-drawer v-model="selectedKnowledge" title="知识查询详情" size="min(760px, 92vw)" append-to-body destroy-on-close><KnowledgeQueryDetail v-if="selectedKnowledge" :item="selectedKnowledge" /></el-drawer>
         <el-tab-pane label="资源消耗" name="resources"
           ><h3>消息与 Token</h3>
           <div class="facts-grid">

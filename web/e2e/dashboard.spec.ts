@@ -113,6 +113,12 @@ test("operator can authenticate, inspect overview and open a Run", async ({
   await expect(page.getByText("桌面云产品知识库", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("部分可回答", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("spec-clarify-requirement", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "查看详情" }).click();
+  await expect(page.getByText("知识查询详情", { exact: true })).toBeVisible();
+  await expect(page.getByText("国产域控支持哪些能力？", { exact: true })).toBeVisible();
+  await expect(page.getByText("支持批量加域和单点登录。[KB-1]", { exact: true })).toBeVisible();
+  await expect(page.getByText("02-产品能力/国产域控.md", { exact: false }).first()).toBeVisible();
+  await page.keyboard.press("Escape");
 
   // 用户管理：管理员创建独立的只读账号，Token 只显示一次。
   await page.getByRole("menuitem", { name: "用户管理" }).click();

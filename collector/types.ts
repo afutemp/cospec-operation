@@ -12,6 +12,7 @@ export interface RunEvent {
   query_source?: "workflow" | "user"; consumer_skill?: string;
   answerability?: "answerable" | "partially_answerable" | "unanswerable" | "conflicted";
   hit_count?: number; citation_count?: number; warning_count?: number;
+  query_detail?: Record<string, unknown>;
   actor?: { employee_id: string; display_name: string; proposer_dept?: string };
 }
 
